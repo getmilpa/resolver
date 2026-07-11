@@ -129,6 +129,54 @@ final class ManifestData
     }
 
     /**
+     * Extract an optional ISO-8601 date/datetime field, defaulting to null. Present-but-unparseable
+     * values throw so an expiry can be trusted. Relative expressions ("now", "tomorrow", "+1 day") are
+     * rejected as non-ISO on purpose: they would make parsing read the wall clock and break the
+     * resolver's purity — the clock is data the caller supplies, never an ambient read.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @throws InvalidManifestException When the field is present but not a valid ISO-8601 date.
+     */
+    public static function optionalIsoDate(array $data, string $key, string $type, ?string $subject = null): ?string
+    {
+        if (!array_key_exists($key, $data) || $data[$key] === null) {
+            return null;
+        }
+        $raw = $data[$key];
+        if (!is_string($raw)) {
+            throw InvalidManifestException::invalidIsoDate($type, $key, is_scalar($raw) ? (string) $raw : get_debug_type($raw), $subject);
+        }
+        $value = trim($raw);
+        if ($value === '') {
+            return null;
+        }
+        if (!self::isIsoDate($value)) {
+            throw InvalidManifestException::invalidIsoDate($type, $key, $value, $subject);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Whether a string is an ISO-8601 date or datetime: year-first shape (so relative expressions are
+     * rejected) that the datetime parser also accepts.
+     */
+    public static function isIsoDate(string $value): bool
+    {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}([T ][0-9:.,+\-Z]*)?$/', $value) !== 1) {
+            return false;
+        }
+        try {
+            new \DateTimeImmutable($value, new \DateTimeZone('UTC'));
+        } catch (\Exception) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Coerce an optional field into a list of non-empty strings, dropping non-scalar entries.
      *
      * @param array<string, mixed> $data

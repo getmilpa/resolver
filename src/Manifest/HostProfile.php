@@ -32,7 +32,7 @@ final readonly class HostProfile
      * @param list<string>         $enabledSurfaces
      * @param list<string>         $requiredCapabilities
      * @param list<string>         $allowedLegacyContracts
-     * @param list<string>         $acceptedRisks
+     * @param list<AcceptedRisk>   $acceptedRisks
      * @param array<string, mixed> $metadata
      */
     public function __construct(
@@ -66,9 +66,37 @@ final readonly class HostProfile
             enabledSurfaces: ManifestData::stringList($data, 'enabledSurfaces'),
             requiredCapabilities: ManifestData::stringList($data, 'requiredCapabilities'),
             allowedLegacyContracts: ManifestData::stringList($data, 'allowedLegacyContracts'),
-            acceptedRisks: ManifestData::stringList($data, 'acceptedRisks'),
+            acceptedRisks: self::parseAcceptedRisks($data),
             metadata: ManifestData::optionalArray($data, 'metadata'),
         );
+    }
+
+    /**
+     * Parse `acceptedRisks` into validated {@see AcceptedRisk} objects. The pre-0.2 bare-string shape
+     * is rejected with a message that teaches the object shape (a bare code can carry no reason, so it
+     * could only ever silence the warning it names).
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<AcceptedRisk>
+     *
+     * @throws InvalidManifestException On a bare-string entry, a non-object entry, or an invalid risk.
+     */
+    private static function parseAcceptedRisks(array $data): array
+    {
+        $out = [];
+        foreach (ManifestData::optionalArray($data, 'acceptedRisks') as $entry) {
+            if (is_string($entry)) {
+                throw InvalidManifestException::acceptedRiskLegacyShape($entry);
+            }
+            if (!is_array($entry)) {
+                throw InvalidManifestException::acceptedRiskLegacyShape(is_scalar($entry) ? (string) $entry : get_debug_type($entry));
+            }
+            /** @var array<string, mixed> $entry */
+            $out[] = AcceptedRisk::fromArray($entry);
+        }
+
+        return $out;
     }
 
     /**
@@ -85,7 +113,7 @@ final readonly class HostProfile
             'enabledSurfaces' => $this->enabledSurfaces,
             'requiredCapabilities' => $this->requiredCapabilities,
             'allowedLegacyContracts' => $this->allowedLegacyContracts,
-            'acceptedRisks' => $this->acceptedRisks,
+            'acceptedRisks' => array_map(static fn (AcceptedRisk $r): array => $r->toArray(), $this->acceptedRisks),
             'metadata' => $this->metadata,
         ];
     }

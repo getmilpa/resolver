@@ -36,6 +36,7 @@ final class ResolutionInputTest extends TestCase
             ],
             'activeSurfaces' => ['cli', 'mcp'],
             'environment' => ['profile' => 'prod'],
+            'evaluatedAt' => '2026-07-11T12:00:00Z',
         ];
     }
 
@@ -63,6 +64,7 @@ final class ResolutionInputTest extends TestCase
 
         self::assertSame(['cli', 'mcp'], $input->activeSurfaces);
         self::assertSame(['profile' => 'prod'], $input->environment);
+        self::assertSame('2026-07-11T12:00:00Z', $input->evaluatedAt);
     }
 
     public function testMissingHostProfileThrows(): void
@@ -74,15 +76,61 @@ final class ResolutionInputTest extends TestCase
         ResolutionInput::fromArray($data);
     }
 
+    public function testEvaluatedAtIsOptionalAndDefaultsToNullNeverNow(): void
+    {
+        $data = self::valid();
+        unset($data['evaluatedAt']);
+
+        $input = ResolutionInput::fromArray($data);
+
+        // Purity: the caller owns the clock — an absent evaluatedAt stays null, never a wall-clock read.
+        self::assertNull($input->evaluatedAt);
+    }
+
+    public function testInvalidEvaluatedAtThrows(): void
+    {
+        $data = self::valid();
+        $data['evaluatedAt'] = 'yesterday';
+
+        $this->expectException(InvalidManifestException::class);
+        ResolutionInput::fromArray($data);
+    }
+
+    public function testFromArrayRejectsNowAsEvaluatedAt(): void
+    {
+        // "now" would make expiry parsing read the wall clock — rejected on the fromArray path.
+        $data = self::valid();
+        $data['evaluatedAt'] = 'now';
+
+        $this->expectException(InvalidManifestException::class);
+        ResolutionInput::fromArray($data);
+    }
+
+    public function testDirectConstructionRejectsNowAsEvaluatedAt(): void
+    {
+        // The purity hole the constructor must close: bypassing fromArray with a relative expression
+        // would otherwise reach the engine's clock comparison and read the wall clock.
+        $this->expectException(InvalidManifestException::class);
+        new ResolutionInput(
+            hostProfile: new HostProfile('agent-ready', '2026.07'),
+            versionManifests: [],
+            contractManifests: [],
+            capabilityProvisions: [],
+            capabilityRequirements: [],
+            evaluatedAt: 'now',
+        );
+    }
+
     public function testToArrayRoundTripsAndIsDeterministic(): void
     {
         $input = ResolutionInput::fromArray(self::valid());
         $array = $input->toArray();
 
         self::assertSame(
-            ['hostProfile', 'versionManifests', 'contractManifests', 'capabilityProvisions', 'capabilityRequirements', 'activeSurfaces', 'environment'],
+            ['hostProfile', 'versionManifests', 'contractManifests', 'capabilityProvisions', 'capabilityRequirements', 'activeSurfaces', 'environment', 'evaluatedAt'],
             array_keys($array),
         );
+        self::assertSame('2026-07-11T12:00:00Z', $array['evaluatedAt']);
 
         // Round-trip: re-hydrating the serialized form yields a byte-identical serialization.
         $again = ResolutionInput::fromArray($array)->toArray();

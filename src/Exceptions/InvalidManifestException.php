@@ -80,6 +80,49 @@ final class InvalidManifestException extends \InvalidArgumentException implement
     }
 
     /**
+     * A date/datetime field does not parse as an ISO-8601 value (relative expressions like "now" are
+     * rejected too — the resolver stays pure, so the clock must be explicit data, never an ambient read).
+     */
+    public static function invalidIsoDate(string $type, string $field, string $value, ?string $subject = null): self
+    {
+        return new self(sprintf(
+            '%s%s field "%s" is not a valid ISO-8601 date: "%s".',
+            $type,
+            self::subject($subject),
+            $field,
+            $value,
+        ));
+    }
+
+    /**
+     * An accepted risk was declared without a reason. Accepting a risk without saying why silences it,
+     * which is exactly what `acceptedRisks` exists to prevent — so the omission is a hard error.
+     */
+    public static function acceptedRiskWithoutReason(string $code): self
+    {
+        return new self(sprintf(
+            'AcceptedRisk "%s" is missing required field "reason": accepting a risk without a reason '
+            . 'silences it. State why the risk is acceptable so the acceptance stays honest and reviewable.',
+            $code,
+        ));
+    }
+
+    /**
+     * The pre-0.2 bare-string `acceptedRisks` shape was used; the message teaches the object shape that
+     * replaced it (a code alone can never carry a reason, so it could only ever silence).
+     */
+    public static function acceptedRiskLegacyShape(string $value): self
+    {
+        return new self(sprintf(
+            'HostProfile field "acceptedRisks" no longer accepts bare strings like "%s". Use an object '
+            . 'that names why the risk is acceptable: { "code": "%s", "reason": "why it is acceptable", '
+            . '"expires": "YYYY-MM-DD" (optional) }.',
+            $value,
+            $value,
+        ));
+    }
+
+    /**
      * The manifest file does not exist at the given path (an ingestion-layer failure — the path is the
      * subject, since there is no decoded content to point at yet).
      */

@@ -50,8 +50,10 @@ final class GraphResolver implements ArchitectureResolver
     private const CODE_SURFACE_REQUIREMENT_UNMET = 'MILPA_SURFACE_REQUIREMENT_UNMET';
     private const CODE_SURFACE_NOT_ENABLED = 'MILPA_SURFACE_NOT_ENABLED';
     private const CODE_LEGACY_CONTRACT_ACTIVE = 'MILPA_LEGACY_CONTRACT_ACTIVE';
+    private const CODE_LEGACY_NOT_ALLOWED = 'MILPA_LEGACY_NOT_ALLOWED';
     private const CODE_DEPRECATED_CONTRACT_USED = 'MILPA_DEPRECATED_CONTRACT_USED';
     private const CODE_SUGGESTED_CAPABILITY_MISSING = 'MILPA_SUGGESTED_CAPABILITY_MISSING';
+    private const CODE_RISK_EXPIRY_UNEVALUATED = 'MILPA_RISK_EXPIRY_UNEVALUATED';
 
     /**
      * Resolve the architecture described by the input into a report.
@@ -147,6 +149,9 @@ final class GraphResolver implements ArchitectureResolver
                         $chosen['package'],
                     ),
                 ];
+                if (!$permitted) {
+                    $missing[] = $this->legacyNotAllowed('contract', $req['id'], $chosen['package'], $host);
+                }
                 $migrationHints[] = [
                     'id' => $req['id'],
                     'from' => $chosen['version'],
@@ -245,15 +250,19 @@ final class GraphResolver implements ArchitectureResolver
             ];
 
             if ($chosen['legacy']) {
+                $permitted = $this->legacyPermitted($host, $req['id']);
                 $legacy[] = [
                     'kind' => 'capability',
                     'id' => $req['id'],
                     'constraint' => $req['constraint'],
                     'code' => self::CODE_LEGACY_CONTRACT_ACTIVE,
                     'providedBy' => $chosen['label'],
-                    'permitted' => $this->legacyPermitted($host, $req['id']),
+                    'permitted' => $permitted,
                     'reason' => sprintf('Capability "%s" is provided by a legacy-shaped manifest.', $req['id']),
                 ];
+                if (!$permitted) {
+                    $missing[] = $this->legacyNotAllowed('capability', $req['id'], $chosen['label'], $host);
+                }
             }
         }
 
@@ -282,7 +291,6 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => null,
                 'code' => self::CODE_SUGGESTED_CAPABILITY_MISSING,
                 'requiredBy' => $sug['requiredBy'],
-                'accepted' => $this->riskAccepted($host, self::CODE_SUGGESTED_CAPABILITY_MISSING),
                 'message' => sprintf('Suggested capability "%s" has no provider; its fallback path applies.', $sug['id']),
             ];
         }
@@ -296,7 +304,6 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => null,
                 'code' => self::CODE_DEPRECATED_CONTRACT_USED,
                 'requiredBy' => $deprecation['requiredBy'],
-                'accepted' => $this->riskAccepted($host, self::CODE_DEPRECATED_CONTRACT_USED),
                 'message' => sprintf(
                     'Package "%s" declares "%s" as deprecated; migrate off it before it is removed.',
                     $deprecation['requiredBy'],
@@ -319,6 +326,11 @@ final class GraphResolver implements ArchitectureResolver
         $missing = [...$missing, ...$surfaceMissing];
         $warnings = [...$warnings, ...$surfaceWarnings];
         $resolved = [...$resolved, ...$surfaceResolved];
+
+        // Fold the host's accepted risks into the warnings (with reason + expiry, evaluated against the
+        // caller's clock). Accepting a risk keeps its warning visible but stops it degrading the status
+        // — unless the acceptance has expired, or its expiry could not be checked for want of a clock.
+        $warnings = $this->applyAcceptedRisks($warnings, $host, $input->evaluatedAt);
 
         // Deterministic ordering.
         $this->sortEntries($resolved, ['kind', 'id', 'requiredBy', 'providedBy']);
@@ -773,7 +785,6 @@ final class GraphResolver implements ArchitectureResolver
                     'surface' => $surface,
                     'code' => $code,
                     'requiredBy' => sprintf('surface:%s', $surface),
-                    'accepted' => $this->riskAccepted($host, $code),
                     'message' => $message,
                 ];
             }
@@ -801,7 +812,6 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => $need['surface'],
                 'code' => self::CODE_SURFACE_NOT_ENABLED,
                 'requiredBy' => $need['requiredBy'],
-                'accepted' => $this->riskAccepted($host, self::CODE_SURFACE_NOT_ENABLED),
                 'message' => sprintf(
                     'Contract %s expects surface "%s", which the host has not enabled.',
                     $need['requiredBy'],
@@ -954,9 +964,144 @@ final class GraphResolver implements ArchitectureResolver
             || in_array($contractId, $host->allowedLegacyContracts, true);
     }
 
-    private function riskAccepted(HostProfile $host, string $code): bool
+    /**
+     * Build the blocking missing[] entry for a legacy path the host's `allowedLegacyContracts` does not
+     * permit — the enforcement of §5's "*permitted* legacy adapter" clause. The same denial stays visible
+     * in `legacy[]` as `permitted: false`; this entry is how it enters the status. It carries the frozen
+     * missing[] key-set: a legacy allowance is a policy boundary, not a version mismatch, so `constraint`
+     * and `surface` are null and the `reason` carries which contract/capability and why. The truth table
+     * is untouched — an un-permitted legacy path is a missing requirement, so `missing !== [] → blocked`.
+     *
+     * @return array<string, mixed>
+     */
+    private function legacyNotAllowed(string $kind, string $id, string $providedBy, HostProfile $host): array
     {
-        return in_array($code, $host->acceptedRisks, true);
+        return [
+            'kind' => 'legacy-contract',
+            'id' => $id,
+            'constraint' => null,
+            'level' => RequirementLevel::Required->value,
+            'requiredBy' => $this->hostLabel($host),
+            'surface' => null,
+            'code' => self::CODE_LEGACY_NOT_ALLOWED,
+            'reason' => sprintf(
+                'The %s "%s" resolves only through the legacy-shaped manifest "%s", which the host profile\'s allowedLegacyContracts does not permit.',
+                $kind,
+                $id,
+                $providedBy,
+            ),
+        ];
+    }
+
+    /**
+     * Fold the host's accepted risks into the warnings. Every warning gains three fields — `accepted`,
+     * `acceptedReason`, `acceptanceExpired` — evaluated against the caller's clock (spec: acceptance is
+     * never anonymous, and a lapsed acceptance re-degrades). An accepted risk whose expiry could not be
+     * checked (no `evaluatedAt`) keeps applying, but the oversight is surfaced as its own visible,
+     * unaccepted MILPA_RISK_EXPIRY_UNEVALUATED warning — the omission is never silent.
+     *
+     * @param list<array<string, mixed>> $warnings
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function applyAcceptedRisks(array $warnings, HostProfile $host, ?string $evaluatedAt): array
+    {
+        $out = [];
+        /** @var array<string, true> $unevaluated */
+        $unevaluated = [];
+
+        foreach ($warnings as $warning) {
+            $code = is_string($warning['code'] ?? null) ? $warning['code'] : '';
+            $verdict = $this->acceptanceFor($host, $code, $evaluatedAt);
+            if ($verdict['unevaluated']) {
+                $unevaluated[$code] = true;
+            }
+            $out[] = [
+                'kind' => $warning['kind'],
+                'id' => $warning['id'],
+                'surface' => $warning['surface'],
+                'code' => $warning['code'],
+                'requiredBy' => $warning['requiredBy'],
+                'accepted' => $verdict['accepted'],
+                'acceptedReason' => $verdict['reason'],
+                'acceptanceExpired' => $verdict['expired'],
+                'message' => $warning['message'],
+            ];
+        }
+
+        // One meta-warning per accepted-risk code whose expiry the caller gave no clock to evaluate.
+        foreach (array_keys($unevaluated) as $code) {
+            $out[] = [
+                'kind' => 'risk-expiry',
+                'id' => $code,
+                'surface' => null,
+                'code' => self::CODE_RISK_EXPIRY_UNEVALUATED,
+                'requiredBy' => $this->hostLabel($host),
+                'accepted' => false,
+                'acceptedReason' => null,
+                'acceptanceExpired' => false,
+                'message' => sprintf(
+                    'The accepted risk "%s" declares an expiry, but the resolution ran without an evaluatedAt clock; pass evaluatedAt or drop the expiry.',
+                    $code,
+                ),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Evaluate whether the host accepts a warning `code`, and how, against the caller's clock: an
+     * accepted risk with no expiry applies; one whose expiry is unreached applies; one whose expiry has
+     * passed is void (and re-degrades); one with an expiry but no clock applies but is flagged as
+     * unevaluated. The clock comparison is a pure function of two ISO-8601 input strings.
+     *
+     * @return array{accepted: bool, reason: string|null, expired: bool, unevaluated: bool}
+     */
+    private function acceptanceFor(HostProfile $host, string $code, ?string $evaluatedAt): array
+    {
+        $none = ['accepted' => false, 'reason' => null, 'expired' => false, 'unevaluated' => false];
+        if ($code === '') {
+            return $none;
+        }
+
+        $risk = null;
+        foreach ($host->acceptedRisks as $candidate) {
+            if ($candidate->code === $code) {
+                $risk = $candidate;
+
+                break;
+            }
+        }
+        if ($risk === null) {
+            return $none;
+        }
+
+        if ($risk->expires === null) {
+            return ['accepted' => true, 'reason' => $risk->reason, 'expired' => false, 'unevaluated' => false];
+        }
+
+        if ($evaluatedAt === null || $evaluatedAt === '') {
+            return ['accepted' => true, 'reason' => $risk->reason, 'expired' => false, 'unevaluated' => true];
+        }
+
+        if ($this->clockIsAfter($evaluatedAt, $risk->expires)) {
+            return ['accepted' => false, 'reason' => $risk->reason, 'expired' => true, 'unevaluated' => false];
+        }
+
+        return ['accepted' => true, 'reason' => $risk->reason, 'expired' => false, 'unevaluated' => false];
+    }
+
+    /**
+     * Whether the caller's clock is strictly after the expiry, comparing both in UTC so the verdict is
+     * independent of the host's default timezone — a deterministic comparison of two input strings, not
+     * an ambient clock read.
+     */
+    private function clockIsAfter(string $evaluatedAt, string $expires): bool
+    {
+        $utc = new \DateTimeZone('UTC');
+
+        return new \DateTimeImmutable($evaluatedAt, $utc) > new \DateTimeImmutable($expires, $utc);
     }
 
     private function hostLabel(HostProfile $host): string

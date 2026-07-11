@@ -7,6 +7,7 @@ namespace Milpa\Resolver\Tests\Engine;
 use Milpa\Resolver\Contracts\ArchitectureResolver;
 use Milpa\Resolver\Engine\GraphResolver;
 use Milpa\Resolver\Input\ResolutionInput;
+use Milpa\Resolver\Manifest\AcceptedRisk;
 use Milpa\Resolver\Manifest\ContractManifest;
 use Milpa\Resolver\Manifest\HostProfile;
 use Milpa\Resolver\Manifest\VersionManifest;
@@ -251,17 +252,22 @@ final class GraphResolverTest extends TestCase
     }
 
     /**
-     * A declared surface warning whose code the host has accepted stays visible but does not degrade.
+     * A declared surface warning whose code the host has accepted stays visible but does not degrade,
+     * and carries the acceptance reason so the acceptance is never anonymous.
      */
     public function testAcceptedRiskKeepsWarningVisibleWithoutDegrading(): void
     {
-        $report = $this->resolve($this->httpSurfaceInput(['HTTP_SCOPES_NOT_ENFORCED']));
+        $report = $this->resolve($this->httpSurfaceInput([
+            new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Scopes enforced at the gateway; reviewed 2026-07.'),
+        ]));
 
         self::assertSame(ResolutionStatus::Valid, $report->status);
 
         $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
         self::assertNotNull($warning);
         self::assertTrue($warning['accepted']);
+        self::assertSame('Scopes enforced at the gateway; reviewed 2026-07.', $warning['acceptedReason']);
+        self::assertFalse($warning['acceptanceExpired']);
     }
 
     /**
@@ -276,6 +282,126 @@ final class GraphResolverTest extends TestCase
         $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
         self::assertNotNull($warning);
         self::assertFalse($warning['accepted']);
+        self::assertNull($warning['acceptedReason']);
+        self::assertFalse($warning['acceptanceExpired']);
+    }
+
+    /**
+     * Rule — accepted risk with an expiry NOT yet reached (evaluatedAt <= expires): the acceptance
+     * holds, the warning stays visible and does not degrade.
+     */
+    public function testAcceptedRiskWithUnreachedExpiryStillApplies(): void
+    {
+        $report = $this->resolve($this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+            evaluatedAt: '2026-07-11T00:00:00Z',
+        ));
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+
+        $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
+        self::assertNotNull($warning);
+        self::assertTrue($warning['accepted']);
+        self::assertFalse($warning['acceptanceExpired']);
+        // No unevaluated-expiry meta-warning when the clock was supplied.
+        self::assertNull($this->entryBy($report->warnings, 'code', 'MILPA_RISK_EXPIRY_UNEVALUATED'));
+    }
+
+    /**
+     * Boundary — `evaluatedAt == expires` exactly: the comparison is a strict `>`, so at the precise
+     * expiry instant the acceptance still HOLDS. A date-only expires means 00:00 UTC of that day, so
+     * the equal instant is that midnight.
+     */
+    public function testAcceptanceStillHoldsWhenEvaluatedAtEqualsExpires(): void
+    {
+        $report = $this->resolve($this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+            evaluatedAt: '2026-12-31T00:00:00Z',
+        ));
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+
+        $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
+        self::assertNotNull($warning);
+        self::assertTrue($warning['accepted']);
+        self::assertFalse($warning['acceptanceExpired']);
+    }
+
+    /**
+     * Boundary — date-only expiry semantics: `expires: "2026-12-31"` is 00:00 UTC of that day, so any
+     * later moment of the SAME day (here noon) already voids the acceptance. Fails toward visibility.
+     */
+    public function testDateOnlyExpiryVoidsFromStartOfTheNamedDay(): void
+    {
+        $report = $this->resolve($this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+            evaluatedAt: '2026-12-31T12:00:00Z',
+        ));
+
+        self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
+
+        $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
+        self::assertNotNull($warning);
+        self::assertFalse($warning['accepted']);
+        self::assertTrue($warning['acceptanceExpired']);
+    }
+
+    /**
+     * Rule — accepted risk whose expiry has passed against the caller's clock: the acceptance is VOID,
+     * the warning degrades the status again and the entry is marked acceptanceExpired.
+     */
+    public function testExpiredAcceptanceIsVoidAndDegradesAgain(): void
+    {
+        $report = $this->resolve($this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+            evaluatedAt: '2027-01-02T00:00:00Z',
+        ));
+
+        self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
+
+        $warning = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
+        self::assertNotNull($warning);
+        self::assertFalse($warning['accepted']);
+        self::assertTrue($warning['acceptanceExpired']);
+        // The reason the (now void) acceptance stated is still carried, so the report explains itself.
+        self::assertSame('Temporary; gateway migration by year-end.', $warning['acceptedReason']);
+    }
+
+    /**
+     * Rule — accepted risk carries an expiry but the input has NO evaluatedAt clock: the acceptance
+     * applies (so nothing is silently blocked) BUT an additional, unaccepted MILPA_RISK_EXPIRY_UNEVALUATED
+     * warning is emitted so the oversight is visible and the status still degrades.
+     */
+    public function testExpiryWithoutAClockAppliesButEmitsAVisibleWarning(): void
+    {
+        $report = $this->resolve($this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+        ));
+
+        // The base acceptance applied — the surface warning is accepted...
+        $accepted = $this->entryBy($report->warnings, 'code', 'HTTP_SCOPES_NOT_ENFORCED');
+        self::assertNotNull($accepted);
+        self::assertTrue($accepted['accepted']);
+        self::assertFalse($accepted['acceptanceExpired']);
+
+        // ...but the expiry-without-a-clock oversight is surfaced as its own unaccepted warning.
+        $meta = $this->entryBy($report->warnings, 'code', 'MILPA_RISK_EXPIRY_UNEVALUATED');
+        self::assertNotNull($meta);
+        self::assertSame('risk-expiry', $meta['kind']);
+        self::assertSame('HTTP_SCOPES_NOT_ENFORCED', $meta['id']);
+        self::assertFalse($meta['accepted']);
+        self::assertNull($meta['acceptedReason']);
+
+        // The oversight degrades the status (never silent) and rides into the agent errors[].
+        self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
+        $error = null;
+        foreach ($report->toArray()['errors'] as $candidate) {
+            if ($candidate['code'] === 'MILPA_RISK_EXPIRY_UNEVALUATED') {
+                $error = $candidate;
+            }
+        }
+        self::assertNotNull($error);
+        self::assertNotSame([], $error['fixes']);
     }
 
     /**
@@ -298,6 +424,23 @@ final class GraphResolverTest extends TestCase
         // A single report re-serializes identically too.
         $report = $this->resolve($input);
         self::assertSame(json_encode($report->toArray()), json_encode($report->toArray()));
+    }
+
+    /**
+     * The same input WITH the same evaluatedAt clock yields a byte-identical report — the expiry clock
+     * is data, not an ambient read, so determinism holds across the acceptance/expiry paths too.
+     */
+    public function testReportIsByteIdempotentWithAnEvaluatedAtClock(): void
+    {
+        $input = $this->httpSurfaceInput(
+            [new AcceptedRisk('HTTP_SCOPES_NOT_ENFORCED', 'Temporary; gateway migration by year-end.', '2026-12-31')],
+            evaluatedAt: '2027-01-02T00:00:00Z',
+        );
+
+        $first = $this->resolve($input)->toArray();
+        $second = $this->resolve($input)->toArray();
+
+        self::assertSame(json_encode($first), json_encode($second));
     }
 
     /**
@@ -635,13 +778,10 @@ final class GraphResolverTest extends TestCase
     }
 
     /**
-     * @param array<string, mixed> $input
-     *
-     * @return ResolutionInput
+     * @param list<AcceptedRisk> $acceptedRisks
      */
-    private function httpSurfaceInput(array $acceptedRisks): ResolutionInput
+    private function httpSurfaceInput(array $acceptedRisks, ?string $evaluatedAt = null): ResolutionInput
     {
-        /** @var list<string> $acceptedRisks */
         return new ResolutionInput(
             hostProfile: new HostProfile(
                 name: 'agent-ready',
@@ -667,6 +807,7 @@ final class GraphResolverTest extends TestCase
                     ],
                 ],
             ],
+            evaluatedAt: $evaluatedAt,
         );
     }
 

@@ -28,6 +28,11 @@ use Milpa\ValueObjects\Capability\CapabilityRequirement;
  * versioned capability provisions and requirements (the canonical records from milpa/core, reused
  * here rather than redefined), and the surfaces currently active plus the resolution environment.
  * The engine receives one of these and returns a report; it never reads the filesystem itself.
+ *
+ * The optional `evaluatedAt` (an ISO-8601 datetime) is the clock the CALLER owns: the engine
+ * evaluates accepted-risk expiry against it and never defaults it to `now()`, so resolution stays
+ * pure and deterministic. When it is absent, expiries go unevaluated and the engine flags the
+ * oversight (a visible warning) instead of silently trusting an expiry it could not check.
  */
 final readonly class ResolutionInput
 {
@@ -38,6 +43,12 @@ final readonly class ResolutionInput
      * @param list<CapabilityRequirement> $capabilityRequirements
      * @param list<string>                $activeSurfaces
      * @param array<string, mixed>        $environment
+     * @param ?string                     $evaluatedAt            The caller's ISO-8601 clock; see the class summary.
+     *
+     * @throws InvalidManifestException When `evaluatedAt` is present but not a valid ISO-8601 datetime
+     *                                  (validated on EVERY construction path — a relative expression
+     *                                  like "now" reaching the engine would read the wall clock and
+     *                                  break purity).
      */
     public function __construct(
         public HostProfile $hostProfile,
@@ -47,7 +58,11 @@ final readonly class ResolutionInput
         public array $capabilityRequirements,
         public array $activeSurfaces = [],
         public array $environment = [],
+        public ?string $evaluatedAt = null,
     ) {
+        if ($this->evaluatedAt !== null && !ManifestData::isIsoDate($this->evaluatedAt)) {
+            throw InvalidManifestException::invalidIsoDate('ResolutionInput', 'evaluatedAt', $this->evaluatedAt);
+        }
     }
 
     /**
@@ -93,6 +108,7 @@ final readonly class ResolutionInput
             capabilityRequirements: $capabilityRequirements,
             activeSurfaces: ManifestData::stringList($data, 'activeSurfaces'),
             environment: ManifestData::optionalArray($data, 'environment'),
+            evaluatedAt: ManifestData::optionalIsoDate($data, 'evaluatedAt', 'ResolutionInput'),
         );
     }
 
@@ -112,6 +128,7 @@ final readonly class ResolutionInput
             'capabilityRequirements' => array_map(self::requirementToArray(...), $this->capabilityRequirements),
             'activeSurfaces' => $this->activeSurfaces,
             'environment' => $this->environment,
+            'evaluatedAt' => $this->evaluatedAt,
         ];
     }
 

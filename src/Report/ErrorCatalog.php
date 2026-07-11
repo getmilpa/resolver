@@ -22,9 +22,12 @@ namespace Milpa\Resolver\Report;
  * The catalog enforces spec §25 anti-pattern 4 ("error muerto"): every code carries why + fix +
  * Academy link, proven by walking the whole catalog in the test suite. Links are the URLs verified
  * live in production — never invented; codes without a dedicated lesson point honestly at the
- * Academy root plus its llms resource. It covers the 11 initial codes of spec §13 plus the two
- * codes that split the engine's ambiguous usages (`MILPA_SURFACE_NOT_ENABLED`,
- * `MILPA_SUGGESTED_CAPABILITY_MISSING`).
+ * Academy root plus its llms resource. It covers the 11 initial codes of spec §13, the two codes
+ * that split the engine's ambiguous usages (`MILPA_SURFACE_NOT_ENABLED`,
+ * `MILPA_SUGGESTED_CAPABILITY_MISSING`), `MILPA_RISK_EXPIRY_UNEVALUATED` (an accepted risk whose
+ * expiry could not be checked because the caller supplied no clock), and `MILPA_LEGACY_NOT_ALLOWED`
+ * (a legacy-shaped resolution the host profile's allowlist does not permit — the enforcement of
+ * `allowedLegacyContracts`).
  */
 final class ErrorCatalog
 {
@@ -146,6 +149,10 @@ final class ErrorCatalog
                 'why' => 'A dependency closes through a legacy-shaped manifest. This is allowed, but never silent: legacy compatibility is named so it stays visible instead of decaying into invisible archaeology.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
             ],
+            'MILPA_LEGACY_NOT_ALLOWED' => [
+                'why' => 'The host explicitly restricts which dependencies may close through a legacy-shaped manifest, and this one resolves only through a shape the profile does not permit. allowedLegacyContracts is a gate, not a note: unlike a tolerated legacy path — which degrades to legacy_compatible — an un-permitted one blocks. An empty or selective allowlist is a deliberate boundary the resolver enforces instead of quietly crossing.',
+                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+            ],
             'MILPA_DEPRECATED_CONTRACT_USED' => [
                 'why' => 'A package still declares something it has marked deprecated. It works today, but the metadata is warning you that this shape is scheduled to leave; migrating before removal is cheaper than after.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
@@ -165,6 +172,10 @@ final class ErrorCatalog
             'MILPA_SUGGESTED_CAPABILITY_MISSING' => [
                 'why' => 'A suggested capability has no provider. Suggested means optional: the graph still closes and the fallback path applies, but the suggested behaviour is absent.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
+            ],
+            'MILPA_RISK_EXPIRY_UNEVALUATED' => [
+                'why' => 'An accepted risk carries an expiry, but the resolution ran without an evaluatedAt clock, so the resolver could not tell whether the acceptance is still valid. The resolver stays pure — it never reads the wall clock itself — so instead of silently trusting an expiry it never checked, it flags the oversight: an unevaluated expiry is a risk you think is bounded but is not being enforced.',
+                'links' => ['academy' => self::ACADEMY_ROOT, 'llms' => self::LLMS],
             ],
         ];
     }
@@ -189,11 +200,13 @@ final class ErrorCatalog
             'MILPA_ADAPTER_MISSING' => sprintf('The adapter "%s" that a contract expects is not installed.', $id),
             'MILPA_HOST_PROFILE_OUTDATED' => sprintf('The host profile %s is out of date for the installed packages.', $host),
             'MILPA_LEGACY_CONTRACT_ACTIVE' => sprintf('The contract "%s" is satisfied through a legacy-shaped manifest.', $id),
+            'MILPA_LEGACY_NOT_ALLOWED' => sprintf('The host profile %s does not permit the legacy-shaped resolution of "%s"; allowedLegacyContracts restricts which legacy paths may close.', $host, $id),
             'MILPA_DEPRECATED_CONTRACT_USED' => sprintf('Package %s declares "%s" as deprecated.', $requiredBy, $id),
             'MILPA_ARCHITECTURE_GRAPH_BLOCKED' => 'The architecture graph is blocked; the host cannot boot until every required dependency closes.',
             'MILPA_BOOTABLE_WITH_WARNINGS' => 'The architecture graph closes with warnings; the host can boot once the warnings are reviewed or accepted.',
             'MILPA_SURFACE_NOT_ENABLED' => sprintf('A contract expects the surface "%s", which the host profile has not enabled.', $surface),
             'MILPA_SUGGESTED_CAPABILITY_MISSING' => sprintf('The suggested capability "%s" has no provider; its fallback path applies.', $id),
+            'MILPA_RISK_EXPIRY_UNEVALUATED' => sprintf('The accepted risk "%s" has an expiry, but the resolution ran without an evaluatedAt clock, so the expiry could not be checked.', $id),
             default => '',
         };
     }
@@ -255,6 +268,11 @@ final class ErrorCatalog
                 sprintf('Migrate "%s" to the canonical contract shape (contracts.* to capabilities.* records).', $id),
                 'Keep the legacy adapter and record it as accepted while you plan the migration.',
             ],
+            'MILPA_LEGACY_NOT_ALLOWED' => [
+                sprintf('Add "%s" to the host profile\'s allowedLegacyContracts to permit this legacy path explicitly.', $id),
+                'Set allowedLegacyContracts to ["*"] to permit every legacy path consciously.',
+                sprintf('Migrate "%s" to the canonical capabilities.* shape so it no longer needs a legacy allowance.', $id),
+            ],
             'MILPA_DEPRECATED_CONTRACT_USED' => [
                 sprintf('Migrate off "%s" before the package removes it.', $id),
                 sprintf('Consult the package\'s migration notes for the replacement of "%s".', $id),
@@ -276,6 +294,10 @@ final class ErrorCatalog
                     ? sprintf('Install %s to enable "%s".', $package, $id)
                     : sprintf('Install a package that provides "%s" to enable it.', $id),
                 sprintf('Accept the missing "%s" suggestion as a known risk in the host profile.', $id),
+            ],
+            'MILPA_RISK_EXPIRY_UNEVALUATED' => [
+                'Pass evaluatedAt (an ISO-8601 datetime) in the resolution input so the acceptance expiry can be checked.',
+                sprintf('Remove the "expires" field from the accepted risk "%s" if the acceptance is not meant to lapse.', $id),
             ],
             default => [],
         };

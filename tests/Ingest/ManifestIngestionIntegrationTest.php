@@ -55,6 +55,43 @@ final class ManifestIngestionIntegrationTest extends TestCase
     }
 
     /**
+     * The gate on the CRM's own posture (T3): flip `allowedLegacyContracts` from `["*"]` to `[]` and the
+     * SAME real legacy plugin manifest that resolved to legacy_compatible now BLOCKS — proof the allowlist
+     * is a real gate, not a note. The real root `milpa.json` is untouched; this is a test-only host profile.
+     */
+    public function testCrmWouldBlockIfItForbadeAllLegacy(): void
+    {
+        $manifest = (new ManifestLoader())->load(__DIR__ . '/../Fixtures/oauthplugin.milpa.json');
+
+        $host = new HostProfile(
+            name: 'teamx-crm',
+            version: '2026.07',
+            requiredCapabilities: ['Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface'],
+            allowedLegacyContracts: [],
+        );
+
+        $report = (new GraphResolver())->resolve(new ResolutionInput(
+            hostProfile: $host,
+            versionManifests: [$manifest],
+            contractManifests: [],
+            capabilityProvisions: [],
+            capabilityRequirements: [],
+        ));
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+
+        $missing = $this->entryBy($report->missing, 'id', 'Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface');
+        self::assertNotNull($missing);
+        self::assertSame('legacy-contract', $missing['kind']);
+        self::assertSame('MILPA_LEGACY_NOT_ALLOWED', $missing['code']);
+
+        // Still visible in legacy[] as not-permitted — both views carry the denial.
+        $legacy = $this->entryBy($report->legacy, 'id', 'Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface');
+        self::assertNotNull($legacy);
+        self::assertFalse($legacy['permitted']);
+    }
+
+    /**
      * @param list<array<string, mixed>> $list
      *
      * @return array<string, mixed>|null

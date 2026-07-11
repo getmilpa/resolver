@@ -16,11 +16,13 @@ use PHPUnit\Framework\TestCase;
  */
 final class ErrorCatalogTest extends TestCase
 {
-    public function testCatalogCoversTheThirteenCodes(): void
+    public function testCatalogCoversTheFifteenCodes(): void
     {
         $codes = ErrorCatalog::codes();
 
-        // The 11 initial codes of spec §13 plus the two ambiguity-splitting codes (T2 carry).
+        // The 11 initial codes of spec §13, the two ambiguity-splitting codes (T2 carry), the
+        // acceptedRisks-expiry-without-a-clock code (invariantes slice T2), plus the
+        // allowedLegacyContracts enforcement code (invariantes slice T3).
         self::assertContains('MILPA_CONTRACT_MISSING', $codes);
         self::assertContains('MILPA_CONTRACT_VERSION_UNSUPPORTED', $codes);
         self::assertContains('MILPA_CAPABILITY_MISSING', $codes);
@@ -29,14 +31,55 @@ final class ErrorCatalogTest extends TestCase
         self::assertContains('MILPA_ADAPTER_MISSING', $codes);
         self::assertContains('MILPA_HOST_PROFILE_OUTDATED', $codes);
         self::assertContains('MILPA_LEGACY_CONTRACT_ACTIVE', $codes);
+        self::assertContains('MILPA_LEGACY_NOT_ALLOWED', $codes);
         self::assertContains('MILPA_DEPRECATED_CONTRACT_USED', $codes);
         self::assertContains('MILPA_ARCHITECTURE_GRAPH_BLOCKED', $codes);
         self::assertContains('MILPA_BOOTABLE_WITH_WARNINGS', $codes);
         self::assertContains('MILPA_SURFACE_NOT_ENABLED', $codes);
         self::assertContains('MILPA_SUGGESTED_CAPABILITY_MISSING', $codes);
+        self::assertContains('MILPA_RISK_EXPIRY_UNEVALUATED', $codes);
 
-        self::assertCount(13, $codes);
+        self::assertCount(15, $codes);
         self::assertSame(array_values(array_unique($codes)), $codes, 'codes are unique');
+    }
+
+    /**
+     * The enforcement code is fully teachable: it names the contract and host, teaches the three honest
+     * ways out (permit explicitly, permit all consciously, or migrate), and points at LIVE links only —
+     * the contratos-grafo unit, the #frontera artifact, and the llms resource. No invented URL.
+     */
+    public function testLegacyNotAllowedIsAFullyTeachableGateCode(): void
+    {
+        $error = ErrorCatalog::for('MILPA_LEGACY_NOT_ALLOWED', [
+            'id' => 'command.host',
+            'hostProfile' => 'teamx-crm@2026.07',
+        ]);
+
+        self::assertStringContainsString('command.host', $error->message);
+        self::assertStringContainsString('teamx-crm@2026.07', $error->message);
+
+        $fixes = implode("\n", $error->fixes);
+        self::assertStringContainsString('allowedLegacyContracts', $fixes);
+        self::assertStringContainsStringIgnoringCase('migrate', $fixes);
+
+        self::assertSame('https://academy.milpa.lat/learn/fundamentos/contratos-grafo/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/artifacts/#frontera', $error->links['artifact']['es']);
+        self::assertArrayHasKey('llms', $error->links);
+    }
+
+    public function testRiskExpiryUnevaluatedIsAFullyTeachableCode(): void
+    {
+        $error = ErrorCatalog::for('MILPA_RISK_EXPIRY_UNEVALUATED', ['id' => 'HTTP_SCOPES_NOT_ENFORCED']);
+
+        self::assertStringContainsString('HTTP_SCOPES_NOT_ENFORCED', $error->message);
+        self::assertNotSame([], $error->fixes);
+        // The fixes teach the two honest ways out: supply a clock, or drop the expiry.
+        $fixes = implode("\n", $error->fixes);
+        self::assertStringContainsStringIgnoringCase('evaluatedAt', $fixes);
+        self::assertStringContainsStringIgnoringCase('expires', $fixes);
+        // Honest links only — the Academy root plus the llms resource (no invented lesson URL).
+        self::assertStringStartsWith('https://academy.milpa.lat/', $error->links['academy']['es']);
+        self::assertArrayHasKey('llms', $error->links);
     }
 
     /**

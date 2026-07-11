@@ -161,6 +161,11 @@ final readonly class LearnableArchitectureError
                 $actions[] = ['type' => 'migrate-contract', 'contract' => $id];
                 break;
 
+            case 'MILPA_LEGACY_NOT_ALLOWED':
+                $actions[] = ['type' => 'allow-legacy-contract', 'contract' => $id];
+                $actions[] = ['type' => 'migrate-contract', 'contract' => $id];
+                break;
+
             case 'MILPA_HOST_PROFILE_OUTDATED':
                 $host = $this->contextString('hostProfile');
                 $actions[] = $host !== ''
@@ -174,6 +179,11 @@ final readonly class LearnableArchitectureError
 
             case 'MILPA_BOOTABLE_WITH_WARNINGS':
                 $actions[] = ['type' => 'review-warnings'];
+                break;
+
+            case 'MILPA_RISK_EXPIRY_UNEVALUATED':
+                $actions[] = ['type' => 'set-evaluated-at'];
+                $actions[] = ['type' => 'remove-risk-expiry', 'code' => $id];
                 break;
         }
 
