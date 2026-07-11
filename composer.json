@@ -1,0 +1,28 @@
+{
+  "name": "milpa/resolver",
+  "description": "The architecture resolver: pure logic that resolves contracts, versioned capabilities, and surfaces against a host profile and reports whether the graph is valid, bootable-with-warnings, blocked, or legacy-compatible.",
+  "type": "library",
+  "license": "Apache-2.0",
+  "require": {
+    "php": ">=8.3",
+    "composer/semver": "^3.0",
+    "milpa/core": "^0.5.1"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^11.5",
+    "phpstan/phpstan": "^2.1",
+    "phpstan/phpdoc-parser": "^2.3",
+    "friendsofphp/php-cs-fixer": "^3.65"
+  },
+  "autoload": {
+    "psr-4": {
+      "Milpa\\Resolver\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Milpa\\Resolver\\Tests\\": "tests/",
+      "Milpa\\Docs\\": "vendor/milpa/core/tools/gen-docs/"
+    }
+  }
+}

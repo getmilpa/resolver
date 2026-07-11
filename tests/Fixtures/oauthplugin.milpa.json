@@ -1,0 +1,41 @@
+{
+    "name": "milpa/oauthplugin",
+    "displayName": "OAuthPlugin",
+    "description": "",
+    "version": "2.0.0",
+    "type": "Service",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Milpa Team",
+            "email": ""
+        }
+    ],
+    "milpa": {
+        "min-version": "2.0.0",
+        "php-version": ">=8.2"
+    },
+    "contracts": {
+        "provides": [
+            "Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\TelegramAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\GitHubOAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\GitLabOAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\FacebookOAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\AppleOAuthServiceInterface",
+            "Milpa\\OAuth\\Contracts\\TwitchOAuthServiceInterface"
+        ],
+        "requires": [],
+        "suggests": []
+    },
+    "dependencies": {
+        "plugins": {},
+        "composer": {}
+    },
+    "entrypoint": "OAuthPlugin.php",
+    "namespace": "Milpa\\Plugins\\OAuthPlugin",
+    "migrations": {
+        "directory": "Migrations"
+    },
+    "env-vars": []
+}

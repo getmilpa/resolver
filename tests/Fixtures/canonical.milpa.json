@@ -1,0 +1,66 @@
+{
+    "$schema": "https://raw.githubusercontent.com/getmilpa/core/main/schema/milpa-plugin.schema.json",
+    "name": "milpa/oauth",
+    "displayName": "OAuth",
+    "version": "1.0.0",
+    "type": "Service",
+    "entrypoint": "src/Plugin.php",
+    "namespace": "Milpa\\OAuth\\",
+    "compatibility": {
+        "core": "^1.0",
+        "php": ">=8.2"
+    },
+    "capabilities": {
+        "provides": [
+            {
+                "id": "milpa.auth.oauth.google",
+                "interface": "Milpa\\Contracts\\OAuthProviderInterface",
+                "contractVersion": "1.0.0",
+                "service": "Milpa\\Providers\\GoogleOAuthProvider",
+                "priority": 100,
+                "exclusive": false
+            },
+            {
+                "id": "milpa.persistence.store",
+                "interface": "Milpa\\Contracts\\StoreInterface",
+                "contractVersion": "2.1.0",
+                "service": "Milpa\\Providers\\SqlStore",
+                "priority": 50,
+                "exclusive": true
+            }
+        ],
+        "requires": [
+            {
+                "id": "milpa.auth.oauth",
+                "interface": "Milpa\\Contracts\\OAuthProviderInterface",
+                "constraint": "^1.0",
+                "oneOf": ["milpa.auth.oauth.google", "milpa.auth.oauth.apple"]
+            }
+        ],
+        "suggests": [
+            {
+                "id": "milpa.audit.logger",
+                "interface": "Milpa\\Contracts\\AuditLoggerInterface",
+                "constraint": "^1.0",
+                "fallback": "noop"
+            }
+        ]
+    },
+    "config": {
+        "env": [
+            {
+                "name": "GOOGLE_CLIENT_SECRET",
+                "required": true,
+                "secret": true,
+                "description": "Google OAuth client secret",
+                "example": "***",
+                "scope": "runtime"
+            }
+        ]
+    },
+    "assets": {
+        "routes": true,
+        "views": "resources/views",
+        "migrations": "migrations"
+    }
+}
