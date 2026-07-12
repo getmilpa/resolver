@@ -15,15 +15,18 @@ declare(strict_types=1);
 namespace Milpa\Resolver\Ingest;
 
 use Milpa\Resolver\Manifest\VersionManifest;
+use Milpa\Resolver\Report\ErrorCatalog;
+use Milpa\Resolver\Report\LearnableArchitectureError;
 
 /**
  * Detects manifest drift: the gap between what a package DECLARES in its `milpa.json` and what its code
  * ACTUALLY carries in `#[PluginMetadata]`. It diffs the two {@see VersionManifest}s field by field —
  * `name`, `version`, and the `provides`/`requires`/`suggests` capability sets (identity compared by
- * interface/id, normalized with `ltrim('\\')` so a leading-backslash FQCN and its bare form are equal).
- *
- * This is the tested primitive only. Turning a non-empty diff into the learnable `manifest drift` error
- * is slice 2; slice 1 ships and proves the detector.
+ * interface/id, normalized with `ltrim('\\')` so a leading-backslash FQCN and its bare form are equal) —
+ * and {@see toLearnableErrors()} lifts a non-empty diff into the one `MILPA_MANIFEST_DRIFT` learnable
+ * error per package, built from the {@see ErrorCatalog} so the drift teaches (why + fixes + Academy
+ * lesson) instead of merely alarming. The engine never emits this code; the host's inspect surface
+ * calls the detector and attaches what it returns.
  */
 final class DriftDetector
 {
@@ -63,6 +66,24 @@ final class DriftDetector
         });
 
         return $drift;
+    }
+
+    /**
+     * Lift a diff into learnable errors: an empty diff yields none; a non-empty one yields exactly ONE
+     * `MILPA_MANIFEST_DRIFT` error for the package, with context `{package, fields: the diff rows}` —
+     * message, why, fixes, and learn links all templated by the {@see ErrorCatalog}.
+     *
+     * @param list<array{field: string, declared: string|null, actual: string|null}> $diff
+     *
+     * @return list<LearnableArchitectureError>
+     */
+    public function toLearnableErrors(array $diff, string $package): array
+    {
+        if ($diff === []) {
+            return [];
+        }
+
+        return [ErrorCatalog::for('MILPA_MANIFEST_DRIFT', ['package' => $package, 'fields' => $diff])];
     }
 
     /**

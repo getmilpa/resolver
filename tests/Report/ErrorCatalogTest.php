@@ -16,13 +16,16 @@ use PHPUnit\Framework\TestCase;
  */
 final class ErrorCatalogTest extends TestCase
 {
-    public function testCatalogCoversTheFifteenCodes(): void
+    public function testCatalogCoversTheSeventeenCodes(): void
     {
         $codes = ErrorCatalog::codes();
 
         // The 11 initial codes of spec §13, the two ambiguity-splitting codes (T2 carry), the
-        // acceptedRisks-expiry-without-a-clock code (invariantes slice T2), plus the
-        // allowedLegacyContracts enforcement code (invariantes slice T3).
+        // acceptedRisks-expiry-without-a-clock code (invariantes slice T2), the
+        // allowedLegacyContracts enforcement code (invariantes slice T3), the
+        // dependency-cycle code (Orden slice T1 — the boot order absorbed from Kahn), plus the
+        // manifest-drift code (Orden slice T2 — caller-emitted by DriftDetector::toLearnableErrors,
+        // never by the engine, like MILPA_ADAPTER_MISSING and MILPA_HOST_PROFILE_OUTDATED).
         self::assertContains('MILPA_CONTRACT_MISSING', $codes);
         self::assertContains('MILPA_CONTRACT_VERSION_UNSUPPORTED', $codes);
         self::assertContains('MILPA_CAPABILITY_MISSING', $codes);
@@ -38,8 +41,10 @@ final class ErrorCatalogTest extends TestCase
         self::assertContains('MILPA_SURFACE_NOT_ENABLED', $codes);
         self::assertContains('MILPA_SUGGESTED_CAPABILITY_MISSING', $codes);
         self::assertContains('MILPA_RISK_EXPIRY_UNEVALUATED', $codes);
+        self::assertContains('MILPA_DEPENDENCY_CYCLE', $codes);
+        self::assertContains('MILPA_MANIFEST_DRIFT', $codes);
 
-        self::assertCount(15, $codes);
+        self::assertCount(17, $codes);
         self::assertSame(array_values(array_unique($codes)), $codes, 'codes are unique');
     }
 
@@ -117,6 +122,93 @@ final class ErrorCatalogTest extends TestCase
         self::assertStringContainsString('agent-ready@2026.07', $error->message);
         // The known package appears in the human fixes.
         self::assertStringContainsString('milpa/command', implode("\n", $error->fixes));
+    }
+
+    /**
+     * The message attributes its requirer (Orden slice T2): when a PACKAGE or a CONTRACT — not the
+     * host profile — asked for the missing capability, the message names it, so the reader learns WHO
+     * opened the graph, not just what is absent.
+     */
+    public function testCapabilityMissingMessageNamesAPackageOrContractRequirer(): void
+    {
+        $fromPackage = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'crm.mailer',
+            'requiredBy' => 'acme/crm@1.2.0',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'acme/crm@1.2.0 requires the capability "crm.mailer", but no active package or plugin provides it.',
+            $fromPackage->message,
+        );
+
+        $fromContract = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'event.dispatcher',
+            'requiredBy' => 'contract:milpa.command@0.1',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'contract:milpa.command@0.1 requires the capability "event.dispatcher", but no active package or plugin provides it.',
+            $fromContract->message,
+        );
+    }
+
+    /**
+     * Host-origin INTACT: a `hostProfile:`-prefixed requiredBy, an absent requiredBy, and the
+     * owner-less `input` sentinel (a caller-supplied typed requirement no installed manifest
+     * declares — not a package) all keep the original host phrasing, byte for byte.
+     */
+    public function testCapabilityMissingMessageKeepsHostPhrasingForHostInputAndAbsentOrigins(): void
+    {
+        $expected = 'The host profile agent-ready@2026.07 requires the capability "command.provider", but no active package or plugin provides it.';
+
+        $hostOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'command.provider',
+            'requiredBy' => 'hostProfile:agent-ready@2026.07',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame($expected, $hostOrigin->message);
+
+        $absentOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'command.provider',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame($expected, $absentOrigin->message);
+
+        $inputOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'command.provider',
+            'requiredBy' => 'input',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame($expected, $inputOrigin->message);
+    }
+
+    /**
+     * The drift code is fully teachable: the message names the drifted package, the fixes teach the
+     * two honest ways out (regenerate the manifest from the code, or fix the attribute), and the
+     * learn links point at the LIVE boundary lesson (atlas-limites) plus the #frontera artifact —
+     * URLs verified live, never invented.
+     */
+    public function testManifestDriftIsAFullyTeachableCode(): void
+    {
+        $error = ErrorCatalog::for('MILPA_MANIFEST_DRIFT', [
+            'package' => 'OAuthPlugin',
+            'fields' => [
+                ['field' => 'provides', 'declared' => 'Foo\\Gone', 'actual' => null],
+                ['field' => 'version', 'declared' => '1.0.0', 'actual' => '2.0.0'],
+            ],
+        ]);
+
+        self::assertStringContainsString('OAuthPlugin', $error->message);
+        self::assertStringContainsString('2', $error->message);
+
+        $fixes = implode("\n", $error->fixes);
+        self::assertStringContainsString('coa:plugins manifest OAuthPlugin', $fixes);
+        self::assertStringContainsString('#[PluginMetadata]', $fixes);
+
+        self::assertSame('https://academy.milpa.lat/learn/arquitectura/atlas-limites/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/en/learn/arquitectura/atlas-limites/', $error->links['academy']['en']);
+        self::assertSame('https://academy.milpa.lat/artifacts/#frontera', $error->links['artifact']['es']);
+        self::assertArrayHasKey('llms', $error->links);
     }
 
     public function testCapabilityMissingPointsAtTheContractsGraphUnitAndSiembra(): void

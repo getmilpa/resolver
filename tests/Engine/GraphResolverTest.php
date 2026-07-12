@@ -672,6 +672,48 @@ final class GraphResolverTest extends TestCase
     }
 
     /**
+     * The owners-index path, end to end (Orden T2 — the untested gap the sweep found): a TYPED
+     * CapabilityRequirement whose id an installed manifest declares in `capabilities.requires` is
+     * attributed to that PACKAGE via requirementOwnerIndex — in the missing[] entry's requiredBy AND
+     * in the learnable error's message, which names the requirer instead of blaming the host profile.
+     */
+    public function testTypedRequirementIsAttributedToItsDeclaringPackageInEntryAndMessage(): void
+    {
+        $input = new ResolutionInput(
+            hostProfile: new HostProfile('agent-ready', '2026.07'),
+            versionManifests: [
+                new VersionManifest(
+                    package: 'acme/crm',
+                    version: '1.2.0',
+                    contracts: ['implements' => []],
+                    capabilities: ['provides' => [], 'requires' => ['crm.mailer']],
+                ),
+            ],
+            contractManifests: [],
+            capabilityProvisions: [],
+            capabilityRequirements: [new CapabilityRequirement('crm.mailer', 'Crm\\Mailer')],
+        );
+
+        $report = $this->resolve($input);
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+
+        $missing = $this->entryBy($report->missing, 'id', 'crm.mailer');
+        self::assertNotNull($missing);
+        self::assertSame('MILPA_CAPABILITY_MISSING', $missing['code']);
+        self::assertSame('acme/crm@1.2.0', $missing['requiredBy']);
+
+        $errors = $report->toArray()['errors'];
+        self::assertCount(1, $errors);
+        self::assertSame('MILPA_CAPABILITY_MISSING', $errors[0]['code']);
+        self::assertSame('acme/crm@1.2.0', $errors[0]['context']['requiredBy']);
+        self::assertSame(
+            'acme/crm@1.2.0 requires the capability "crm.mailer", but no active package or plugin provides it.',
+            $errors[0]['message'],
+        );
+    }
+
+    /**
      * A conflict is attached to the agent errors[] too, with a choose-provider action naming the
      * conflicting candidates from the entry context.
      */

@@ -25,9 +25,16 @@ namespace Milpa\Resolver\Report;
  * Academy root plus its llms resource. It covers the 11 initial codes of spec §13, the two codes
  * that split the engine's ambiguous usages (`MILPA_SURFACE_NOT_ENABLED`,
  * `MILPA_SUGGESTED_CAPABILITY_MISSING`), `MILPA_RISK_EXPIRY_UNEVALUATED` (an accepted risk whose
- * expiry could not be checked because the caller supplied no clock), and `MILPA_LEGACY_NOT_ALLOWED`
+ * expiry could not be checked because the caller supplied no clock), `MILPA_LEGACY_NOT_ALLOWED`
  * (a legacy-shaped resolution the host profile's allowlist does not permit — the enforcement of
- * `allowedLegacyContracts`).
+ * `allowedLegacyContracts`), `MILPA_DEPENDENCY_CYCLE` (packages that require each other in a
+ * cycle, for which no boot order exists), and `MILPA_MANIFEST_DRIFT` (a `milpa.json` that no longer
+ * matches the code's `#[PluginMetadata]` — caller-emitted by
+ * {@see \Milpa\Resolver\Ingest\DriftDetector::toLearnableErrors()}, never by the engine).
+ *
+ * Messages attribute their requirer: when `context.requiredBy` names a package or a contract, the
+ * templated message names it too, so the reader learns WHO opened the graph — not just what is
+ * missing. Host-origin entries (a `hostProfile:`-prefixed requiredBy) keep the host phrasing.
  */
 final class ErrorCatalog
 {
@@ -59,6 +66,12 @@ final class ErrorCatalog
     private const ARTIFACT_FRONTERA = [
         'es' => 'https://academy.milpa.lat/artifacts/#frontera',
         'en' => 'https://academy.milpa.lat/en/artifacts/#frontera',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const UNIT_ATLAS_LIMITES = [
+        'es' => 'https://academy.milpa.lat/learn/arquitectura/atlas-limites/',
+        'en' => 'https://academy.milpa.lat/en/learn/arquitectura/atlas-limites/',
     ];
 
     /** @var array{es: string, en: string} */
@@ -177,10 +190,24 @@ final class ErrorCatalog
                 'why' => 'An accepted risk carries an expiry, but the resolution ran without an evaluatedAt clock, so the resolver could not tell whether the acceptance is still valid. The resolver stays pure — it never reads the wall clock itself — so instead of silently trusting an expiry it never checked, it flags the oversight: an unevaluated expiry is a risk you think is bounded but is not being enforced.',
                 'links' => ['academy' => self::ACADEMY_ROOT, 'llms' => self::LLMS],
             ],
+            'MILPA_DEPENDENCY_CYCLE' => [
+                'why' => 'A dependency cycle has no possible boot order — nobody can go first. Each member requires something another member provides, so whichever package boots first finds its requirement not yet wired. The cycle members are excluded from loadOrder[] and the graph blocks until the cycle is broken.',
+                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+            ],
+            'MILPA_MANIFEST_DRIFT' => [
+                'why' => 'The manifest promises one architecture and the code carries another. The contract that teaches is the one that runs, not the one that is written: a drifted milpa.json teaches humans and agents a shape that no longer exists, so every decision made from it inherits the gap.',
+                'links' => ['academy' => self::UNIT_ATLAS_LIMITES, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+            ],
         ];
     }
 
     /**
+     * Template the message for a code from the entry context. `MILPA_CAPABILITY_MISSING` attributes
+     * its requirer: a package (`vendor/package@x.y.z`) or contract (`contract:<id>@<v>`) requiredBy is
+     * named in the message; a `hostProfile:`-prefixed requiredBy, an absent one, and the owner-less
+     * `input` sentinel (a caller-supplied typed requirement no installed manifest declares — NOT a
+     * package) all keep the host phrasing.
+     *
      * @param array<string, mixed> $context
      */
     private static function message(string $code, array $context): string
@@ -190,11 +217,14 @@ final class ErrorCatalog
         $host = self::str($context, 'hostProfile');
         $constraint = self::str($context, 'constraint');
         $requiredBy = self::str($context, 'requiredBy');
+        $driftedFields = $context['fields'] ?? null;
 
         return match ($code) {
             'MILPA_CONTRACT_MISSING' => sprintf('The host profile %s requires the contract "%s", but no installed package implements it.', $host, $id),
             'MILPA_CONTRACT_VERSION_UNSUPPORTED' => sprintf('The contract "%s" is implemented, but no implementation satisfies the constraint "%s".', $id, $constraint),
-            'MILPA_CAPABILITY_MISSING' => sprintf('The host profile %s requires the capability "%s", but no active package or plugin provides it.', $host, $id),
+            'MILPA_CAPABILITY_MISSING' => $requiredBy !== '' && $requiredBy !== 'input' && !str_starts_with($requiredBy, 'hostProfile:')
+                ? sprintf('%s requires the capability "%s", but no active package or plugin provides it.', $requiredBy, $id)
+                : sprintf('The host profile %s requires the capability "%s", but no active package or plugin provides it.', $host, $id),
             'MILPA_CAPABILITY_CONFLICT' => sprintf('The exclusive capability "%s" is claimed by more than one provider.', $id),
             'MILPA_SURFACE_REQUIREMENT_UNMET' => sprintf('The active surface "%s" requires the capability "%s", which no provider offers.', $surface, $id),
             'MILPA_ADAPTER_MISSING' => sprintf('The adapter "%s" that a contract expects is not installed.', $id),
@@ -207,6 +237,12 @@ final class ErrorCatalog
             'MILPA_SURFACE_NOT_ENABLED' => sprintf('A contract expects the surface "%s", which the host profile has not enabled.', $surface),
             'MILPA_SUGGESTED_CAPABILITY_MISSING' => sprintf('The suggested capability "%s" has no provider; its fallback path applies.', $id),
             'MILPA_RISK_EXPIRY_UNEVALUATED' => sprintf('The accepted risk "%s" has an expiry, but the resolution ran without an evaluatedAt clock, so the expiry could not be checked.', $id),
+            'MILPA_DEPENDENCY_CYCLE' => sprintf('The packages %s require each other in a cycle; no boot order exists.', $id),
+            'MILPA_MANIFEST_DRIFT' => sprintf(
+                'The manifest of %s declares an architecture its code does not carry; %d field(s) drifted between milpa.json and #[PluginMetadata].',
+                self::str($context, 'package'),
+                is_array($driftedFields) ? count($driftedFields) : 0,
+            ),
             default => '',
         };
     }
@@ -298,6 +334,17 @@ final class ErrorCatalog
             'MILPA_RISK_EXPIRY_UNEVALUATED' => [
                 'Pass evaluatedAt (an ISO-8601 datetime) in the resolution input so the acceptance expiry can be checked.',
                 sprintf('Remove the "expires" field from the accepted risk "%s" if the acceptance is not meant to lapse.', $id),
+            ],
+            'MILPA_DEPENDENCY_CYCLE' => [
+                sprintf('Break the cycle (%s) by extracting the shared contract into a third package both sides can require.', $id),
+                'Invert one direction of the cycle: downgrade the weaker dependency to a suggests so one member can boot first.',
+            ],
+            'MILPA_MANIFEST_DRIFT' => [
+                sprintf(
+                    'Regenerate the manifest from the code: php coa coa:plugins manifest %s.',
+                    self::str($context, 'package') !== '' ? self::str($context, 'package') : '<Plugin>',
+                ),
+                'Fix the #[PluginMetadata] attribute instead, if the manifest is right and the code is what drifted.',
             ],
             default => [],
         };

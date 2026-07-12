@@ -54,7 +54,7 @@ final class ReportShapeContractsTest extends TestCase
                 'reason' => ['non-empty-string'],
             ],
             'conflicts' => [
-                'kind' => ['non-empty-string', ['capability']],
+                'kind' => ['non-empty-string', ['capability', 'dependency-cycle']],
                 'id' => ['non-empty-string'],
                 'code' => ['non-empty-string', 'catalog'],
                 'providedBy' => ['string[]'],
@@ -88,6 +88,10 @@ final class ReportShapeContractsTest extends TestCase
                 'requiredBy' => ['non-empty-string'],
                 'providedBy' => ['non-empty-string'],
                 'via' => ['non-empty-string', ['direct', 'legacy', 'oneOf']],
+            ],
+            'loadOrder' => [
+                'name' => ['non-empty-string'],
+                'version' => ['string'],
             ],
             'migrationHints' => [
                 'id' => ['non-empty-string'],
@@ -123,6 +127,7 @@ final class ReportShapeContractsTest extends TestCase
     {
         return [
             'missing' => ['field' => 'kind', 'values' => ['contract', 'capability', 'surface-requirement', 'legacy-contract']],
+            'conflicts' => ['field' => 'kind', 'values' => ['capability', 'dependency-cycle']],
             'warnings' => ['field' => 'kind', 'values' => ['suggested-capability', 'deprecation', 'surface', 'risk-expiry']],
             'legacy' => ['field' => 'kind', 'values' => ['contract', 'capability']],
             'resolved' => ['field' => 'via', 'values' => ['direct', 'legacy', 'oneOf']],
@@ -502,6 +507,35 @@ final class ReportShapeContractsTest extends TestCase
                         ],
                     ],
                 ],
+            ),
+            // A dependency cycle (conflicts:dependency-cycle, MILPA_DEPENDENCY_CYCLE, status blocked):
+            // cycle/a and cycle/b require each other's capability, so neither can boot first; the
+            // independent third package keeps loadOrder[] populated while the members stay out of it.
+            new ResolutionInput(
+                hostProfile: new HostProfile('agent-ready', '2026.07'),
+                versionManifests: [
+                    new VersionManifest(
+                        package: 'cycle/a',
+                        version: '1.0.0',
+                        contracts: ['implements' => []],
+                        capabilities: ['provides' => ['cap.a'], 'requires' => ['cap.b']],
+                    ),
+                    new VersionManifest(
+                        package: 'cycle/b',
+                        version: '1.0.0',
+                        contracts: ['implements' => []],
+                        capabilities: ['provides' => ['cap.b'], 'requires' => ['cap.a']],
+                    ),
+                    new VersionManifest(
+                        package: 'cycle/standalone',
+                        version: '1.0.0',
+                        contracts: ['implements' => []],
+                        capabilities: ['provides' => []],
+                    ),
+                ],
+                contractManifests: [],
+                capabilityProvisions: [],
+                capabilityRequirements: [],
             ),
             // An accepted risk with an expiry but NO evaluatedAt clock (warnings:risk-expiry — the
             // MILPA_RISK_EXPIRY_UNEVALUATED oversight — plus the accepted surface warning it rides on).

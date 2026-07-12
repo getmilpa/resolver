@@ -37,9 +37,16 @@ use Milpa\ValueObjects\Capability\CapabilityProvision;
  * `valid`, `bootable_with_warnings`, `legacy_compatible`, or `blocked`. Error codes travel as plain
  * strings on the report entries; milpa/resolver's learnable-error catalog is layered on top of them.
  *
+ * The report also ORDERS the boot: `loadOrder[]` is the topological sort of the version manifests
+ * (Kahn's algorithm, absorbed from the legacy `Milpa\Plugin\ContractResolver`) over the exact-string
+ * capability/contract ids they provide and require. A dependency cycle has no possible boot order —
+ * nobody can go first — so it blocks as a learnable `conflicts[]` entry (`MILPA_DEPENDENCY_CYCLE`)
+ * instead of throwing.
+ *
  * Purity is a hard invariant: the engine reads only its input — no filesystem, no network, no clock,
  * no randomness — so the same input always yields a byte-identical report. Every report list is sorted
- * by a total key order for that determinism.
+ * by a total key order for that determinism — except `loadOrder[]`, whose order is the payload itself
+ * (still deterministic: a pure function of the input order).
  */
 final class GraphResolver implements ArchitectureResolver
 {
@@ -54,6 +61,7 @@ final class GraphResolver implements ArchitectureResolver
     private const CODE_DEPRECATED_CONTRACT_USED = 'MILPA_DEPRECATED_CONTRACT_USED';
     private const CODE_SUGGESTED_CAPABILITY_MISSING = 'MILPA_SUGGESTED_CAPABILITY_MISSING';
     private const CODE_RISK_EXPIRY_UNEVALUATED = 'MILPA_RISK_EXPIRY_UNEVALUATED';
+    private const CODE_DEPENDENCY_CYCLE = 'MILPA_DEPENDENCY_CYCLE';
 
     /**
      * Resolve the architecture described by the input into a report.
@@ -346,7 +354,15 @@ final class GraphResolver implements ArchitectureResolver
         // — unless the acceptance has expired, or its expiry could not be checked for want of a clock.
         $warnings = $this->applyAcceptedRisks($warnings, $host, $input->evaluatedAt);
 
-        // Deterministic ordering.
+        // The boot order — the Kahn pass absorbed from the legacy Milpa\Plugin\ContractResolver. A
+        // dependency cycle is not an exception here: it joins conflicts[] as a blocking, learnable
+        // entry (the status truth table below is untouched — conflicts !== [] already blocks).
+        [$loadOrder, $cycleConflicts] = $this->computeLoadOrder($input->versionManifests);
+        $conflicts = [...$conflicts, ...$cycleConflicts];
+
+        // Deterministic ordering. loadOrder[] is deliberately EXEMPT: its order IS the payload — the
+        // boot sequence the graph dictates — and it is already deterministic as a pure function of
+        // the input order. Every other list is sorted by a total key order.
         $this->sortEntries($resolved, ['kind', 'id', 'requiredBy', 'providedBy']);
         $this->sortEntries($missing, ['kind', 'id', 'constraint', 'requiredBy']);
         $this->sortEntries($conflicts, ['id']);
@@ -367,6 +383,7 @@ final class GraphResolver implements ArchitectureResolver
         return new ResolutionReport(
             status: $status,
             resolved: $resolved,
+            loadOrder: $loadOrder,
             missing: $missing,
             conflicts: $conflicts,
             warnings: $warnings,
@@ -753,6 +770,165 @@ final class GraphResolver implements ArchitectureResolver
         }
 
         return $out;
+    }
+
+    /**
+     * Compute the boot order of the version manifests — Kahn's algorithm absorbed from the legacy
+     * `Milpa\Plugin\ContractResolver::getLoadOrder()`, its semantics replicated exactly over the
+     * exact-string capability/contract ids the engine already matches:
+     *
+     *  - the id→provider map takes the LAST provider in input order (a duplicated non-exclusive
+     *    provider silently wins as the edge source — the legacy behaviour, documented);
+     *  - an edge provider→dependent exists only when a provider for the required id exists (a
+     *    requirement nobody provides never bends the order — the miss already lives in missing[]);
+     *  - a self-dependency is skipped;
+     *  - the queue is seeded iterating the manifests in their GIVEN order and consumed FIFO, so
+     *    packages with no edges between them boot in the exact order the host configured;
+     *  - the leftover nodes of an unfinished sort are a dependency cycle: they are excluded from the
+     *    order and reported as ONE blocking conflicts[] entry (`kind: dependency-cycle`) whose `id`
+     *    joins the member names (lexicographic) with ' <-> ' and whose `providedBy` carries each
+     *    member's name@version identity — the same frozen conflict key-set, no new keys.
+     *
+     * @param list<VersionManifest> $manifests
+     *
+     * @return array{0: list<array{name: string, version: string}>, 1: list<array<string, mixed>>}
+     */
+    private function computeLoadOrder(array $manifests): array
+    {
+        /** @var array<string, VersionManifest> $byName */
+        $byName = [];
+        foreach ($manifests as $manifest) {
+            $byName[$manifest->package] = $manifest;
+        }
+
+        // id → providing package name; iterating in input order means the LAST provider wins.
+        /** @var array<string, string> $providerById */
+        $providerById = [];
+        foreach ($manifests as $manifest) {
+            foreach ($this->providedIds($manifest) as $id) {
+                $providerById[$id] = $manifest->package;
+            }
+        }
+
+        /** @var array<string, list<string>> $graph */
+        $graph = [];
+        /** @var array<string, int> $inDegree */
+        $inDegree = [];
+        foreach ($byName as $name => $manifest) {
+            $graph[$name] = [];
+            $inDegree[$name] = 0;
+        }
+
+        foreach ($manifests as $manifest) {
+            $name = $manifest->package;
+            foreach ($this->requiredIds($manifest) as $id) {
+                if (!isset($providerById[$id])) {
+                    continue;
+                }
+                $dependsOn = $providerById[$id];
+                if ($dependsOn === $name) {
+                    continue;
+                }
+                $graph[$dependsOn][] = $name;
+                ++$inDegree[$name];
+            }
+        }
+
+        // Kahn: seed the queue in input order, consume FIFO.
+        $queue = [];
+        foreach ($inDegree as $name => $degree) {
+            if ($degree === 0) {
+                $queue[] = $name;
+            }
+        }
+
+        $loadOrder = [];
+        $sortedNames = [];
+        while ($queue !== []) {
+            $current = array_shift($queue);
+            $sortedNames[$current] = true;
+            $loadOrder[] = ['name' => $current, 'version' => $byName[$current]->version];
+            foreach ($graph[$current] as $dependent) {
+                --$inDegree[$dependent];
+                if ($inDegree[$dependent] === 0) {
+                    $queue[] = $dependent;
+                }
+            }
+        }
+
+        if (count($loadOrder) === count($byName)) {
+            return [$loadOrder, []];
+        }
+
+        // Leftover nodes never reached in-degree zero: a dependency cycle (plus anything riding on
+        // it). No boot order exists for them — nobody can go first.
+        $members = array_values(array_diff(array_keys($byName), array_keys($sortedNames)));
+        sort($members);
+        $labels = array_map(static fn (string $name): string => sprintf('%s@%s', $name, $byName[$name]->version), $members);
+        sort($labels);
+
+        return [$loadOrder, [[
+            'kind' => 'dependency-cycle',
+            'id' => implode(' <-> ', $members),
+            'code' => self::CODE_DEPENDENCY_CYCLE,
+            'providedBy' => $labels,
+            'reason' => sprintf(
+                'The packages %s require each other in a cycle; no boot order exists — nobody can go first.',
+                implode(', ', $members),
+            ),
+        ]]];
+    }
+
+    /**
+     * The exact-string ids a manifest provides for the ordering pass: every `capabilities.provides`
+     * capability id plus every `contracts.implements` contract id — the same ids, parsed the same
+     * way, the resolution passes above match on.
+     *
+     * @return list<string>
+     */
+    private function providedIds(VersionManifest $manifest): array
+    {
+        $ids = [];
+        foreach ($this->rawList($manifest->capabilities, 'provides') as $entry) {
+            if (!is_string($entry) && !is_array($entry)) {
+                continue;
+            }
+            $ids[] = CapabilityProvision::parse($entry)->id;
+        }
+        foreach ($this->rawList($manifest->contracts, 'implements') as $entry) {
+            if (!is_string($entry)) {
+                continue;
+            }
+            $ids[] = $this->splitImplementation($entry)[0];
+        }
+
+        return $ids;
+    }
+
+    /**
+     * The exact-string ids a manifest requires for the ordering pass: every `capabilities.requires`
+     * capability id plus every `contracts.requires` contract id (constraint stripped — version
+     * satisfaction is the resolution passes' job; ordering only needs who depends on whom).
+     *
+     * @return list<string>
+     */
+    private function requiredIds(VersionManifest $manifest): array
+    {
+        $ids = [];
+        foreach ($this->rawList($manifest->capabilities, 'requires') as $entry) {
+            $id = $this->entryId($entry);
+            if ($id !== null) {
+                $ids[] = $id;
+            }
+        }
+        foreach ($this->rawList($manifest->contracts, 'requires') as $entry) {
+            if (!is_string($entry)) {
+                continue;
+            }
+            $ids[] = $this->splitConstraint($entry)[0];
+        }
+
+        return $ids;
     }
 
     /**

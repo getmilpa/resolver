@@ -95,7 +95,7 @@ missing is `bootable_with_warnings`; required closing through a permitted legacy
 | `Manifest\HostProfile` | The architectural shape the app expects (not the same as `composer.json`): required contracts, enabled surfaces, required capabilities, allowed legacy contracts, accepted risks (each an `AcceptedRisk` with a mandatory reason and optional expiry), and free-form metadata. |
 | `Manifest\AcceptedRisk` | A risk the host has explicitly acknowledged: the warning `code` it accepts, the mandatory `reason` that makes the acceptance honest (accepting without a reason silences), and an optional ISO-8601 `expires` after which the acceptance lapses. A date-only `expires` means 00:00 UTC of that day — the acceptance is void the moment the named day begins. |
 | `Input\ResolutionInput` | Everything the engine needs, materialized: a host profile plus the manifests, provisions, requirements, active surfaces, and an optional `evaluatedAt` clock (ISO-8601) the caller owns. |
-| `Report\ResolutionReport` | The verdict: a `ResolutionStatus`, the learnable `errors` attached to every block, and what resolved, what is missing, conflicts, warnings, legacy usage, migration hints, and learn links. Serializes deterministically via `toArray()`. |
+| `Report\ResolutionReport` | The verdict: a `ResolutionStatus`, the learnable `errors` attached to every block, the `loadOrder` the graph dictates for booting, and what resolved, what is missing, conflicts, warnings, legacy usage, migration hints, and learn links. Serializes deterministically via `toArray()`. |
 | `Report\LearnableArchitectureError` | A teachable diagnosis (spec §12): code, message, `why`, context, human fixes, and Academy links — serializing to the agent shape (spec §20) with typed `recommendedActions` and a bilingual `learn` map. |
 | `Report\ErrorCatalog` | The single source of learnable-error content: for every code, the cause, the fixes, and the LIVE Academy links. Enforces "no dead error" (spec §25 anti-pattern 4). |
 | `Capability\RequirementLevel` | Whether a capability is `required`, `suggested`, or `optional`. |
@@ -168,14 +168,15 @@ A required contract, capability, surface-requirement, or un-permitted legacy pat
 
 #### `conflicts[]`
 
-Two or more distinct providers claim the same id where at least one marks it exclusive — blocks.
+Two or more distinct providers claim the same id where at least one marks it exclusive, or a set of
+packages requires each other in a dependency cycle — either way, blocks.
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `kind` | `capability` | Conflicts are exclusive-capability conflicts. |
-| `id` | `string` | The exclusive capability id claimed by more than one provider. |
-| `code` | `string (catalog)` | Always `MILPA_CAPABILITY_CONFLICT`. |
-| `providedBy` | `string[]` | The conflicting provider labels, sorted — the candidates to choose between. |
+| `kind` | `capability` \| `dependency-cycle` | An exclusive-capability conflict, or a dependency cycle with no possible boot order. |
+| `id` | `string` | The exclusive capability id claimed by more than one provider; for a cycle, the member package names (lexicographic) joined with ` <-> `. |
+| `code` | `string (catalog)` | `MILPA_CAPABILITY_CONFLICT` for a capability conflict; `MILPA_DEPENDENCY_CYCLE` for a cycle. |
+| `providedBy` | `string[]` | The conflicting provider labels, sorted — the candidates to choose between; for a cycle, each member's `name@version` identity (lexicographic). |
 | `reason` | `string` | A one-line human explanation of the conflict. |
 
 #### `warnings[]`
@@ -224,6 +225,22 @@ A requirement that closed cleanly — the positive record of what the graph wire
 | `providedBy` | `string` | The provider that closed it: a service, a package label, or `contract:<id>@<v>`. |
 | `via` | `direct` \| `legacy` \| `oneOf` | How it closed: a direct provider, a legacy adapter, or a `oneOf` alternative. |
 
+#### `loadOrder[]`
+
+The boot order the graph dictates: the topological sort of the version manifests (Kahn's algorithm,
+absorbed from the legacy `Milpa\Plugin\ContractResolver`) over the exact-string capability/contract
+ids they provide and require. **The order is semantic** — this is the ONE list `toArray()` does not
+sort lexicographically, because its sequence IS the payload: dependencies come before their
+dependents, and packages with no edges between them keep the exact order the host configured. It is
+still fully deterministic (a pure function of the input order). The members of a dependency cycle
+are excluded — they appear in `conflicts[]` as a `dependency-cycle` entry instead — while every
+non-cyclic package keeps its place.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `name` | `string` | The package name, in boot position — the runtime maps it to its plugin record. |
+| `version` | `string` | The package version, completing the `name@version` identity `coa inspect` and agents consume. |
+
 #### `migrationHints[]`
 
 Emitted alongside a legacy path — a contract or a capability — telling you how to migrate off it.
@@ -251,6 +268,17 @@ The Academy links a resolved contract carries along (at least one of `academy`/`
 The learnable error attached to every blocking entry, every catalog-coded warning, and every
 permitted legacy path (its `MILPA_LEGACY_CONTRACT_ACTIVE` lesson — allowed, but never silent) — the
 agent shape of spec §20. Leads the report (right after `status`) so a reader sees the diagnosis first.
+
+**Errors attribute their requirer**: when a *package* (`vendor/package@x.y.z`) or a *contract*
+(`contract:<id>@<v>`) — not the host profile — asked for a missing capability, the `message` names it
+(`acme/crm@1.2.0 requires the capability "crm.mailer", …`), so the reader learns *who* opened the
+graph, not just what is absent. Host-origin entries keep the `The host profile …` phrasing.
+`MILPA_MANIFEST_DRIFT` is **caller-emitted** rather than engine-emitted: it is built by
+`DriftDetector::toLearnableErrors()` when a package's `milpa.json` no longer matches its
+`#[PluginMetadata]`. Consumers render any report's diagnosis with
+`ResolutionReport::firstLearnableLine()` — the canonical
+`{code}: {message} — {why} Fix: {fixes[0]} Learn: {learn.academy.en}` line, `null` when `errors[]`
+is empty.
 
 | Field | Type | Semantics |
 |-------|------|-----------|

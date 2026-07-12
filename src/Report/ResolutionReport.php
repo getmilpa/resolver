@@ -19,17 +19,20 @@ use Milpa\Resolver\Support\ManifestData;
 
 /**
  * The result of a resolution: a {@see ResolutionStatus} plus the learnable `errors` attached to the
- * blocking entries, what `resolved`, what is `missing`, the `conflicts` and non-blocking `warnings`,
- * the `legacy` dependencies in use, `migrationHints`, `learnLinks` into the Academy, and free-form
- * `metadata`. Designed to be read by a human on the CLI, by CI, by an agent, and by the Academy
- * alike, so {@see toArray()} serializes with a fixed, deterministic key order — the same report
- * renders byte-for-byte identically every time. `errors[]` leads (right after `status`) so an agent
- * reads the diagnosis first (spec §20).
+ * blocking entries, what `resolved`, the `loadOrder` the graph dictates for booting, what is
+ * `missing`, the `conflicts` and non-blocking `warnings`, the `legacy` dependencies in use,
+ * `migrationHints`, `learnLinks` into the Academy, and free-form `metadata`. Designed to be read by
+ * a human on the CLI, by CI, by an agent, and by the Academy alike, so {@see toArray()} serializes
+ * with a fixed, deterministic key order — the same report renders byte-for-byte identically every
+ * time. `errors[]` leads (right after `status`) so an agent reads the diagnosis first (spec §20).
+ * `loadOrder[]` is the one list whose ORDER is the payload: each entry is a `{name, version}`
+ * package identity, sequenced by the engine's topological pass — it is never re-sorted.
  */
 final readonly class ResolutionReport
 {
     /**
      * @param list<array<string, mixed>>       $resolved
+     * @param list<array<string, mixed>>       $loadOrder
      * @param list<array<string, mixed>>       $missing
      * @param list<array<string, mixed>>       $conflicts
      * @param list<array<string, mixed>>       $warnings
@@ -42,6 +45,7 @@ final readonly class ResolutionReport
     public function __construct(
         public ResolutionStatus $status,
         public array $resolved = [],
+        public array $loadOrder = [],
         public array $missing = [],
         public array $conflicts = [],
         public array $warnings = [],
@@ -76,6 +80,7 @@ final readonly class ResolutionReport
         return new self(
             status: $status,
             resolved: ManifestData::recordList($data, 'resolved'),
+            loadOrder: ManifestData::recordList($data, 'loadOrder'),
             missing: ManifestData::recordList($data, 'missing'),
             conflicts: ManifestData::recordList($data, 'conflicts'),
             warnings: ManifestData::recordList($data, 'warnings'),
@@ -85,6 +90,29 @@ final readonly class ResolutionReport
             metadata: ManifestData::optionalArray($data, 'metadata'),
             errors: $errors,
         );
+    }
+
+    /**
+     * The canonical one-line teaching message of the report's FIRST learnable error, or `null` when
+     * `errors[]` is empty: `{code}: {message} — {why} Fix: {fixes[0]} Learn: {learn.academy.en}`.
+     *
+     * This is THE line a blocked boot logs or throws — the exact composition the runtime kernel and
+     * the host's Plugins loader each duplicated by hand until Orden T2; both now delegate here, so the
+     * message can never drift between surfaces. Defensive by contract: an error with no fixes or no
+     * English academy link still composes, with the segment left empty.
+     */
+    public function firstLearnableLine(): ?string
+    {
+        $first = $this->errors[0] ?? null;
+        if ($first === null) {
+            return null;
+        }
+
+        $fix = $first->fixes[0] ?? '';
+        $academy = $first->links['academy'] ?? null;
+        $learn = is_array($academy) && is_string($academy['en'] ?? null) ? $academy['en'] : '';
+
+        return sprintf('%s: %s — %s Fix: %s Learn: %s', $first->code, $first->message, $first->why, $fix, $learn);
     }
 
     /**
@@ -99,6 +127,7 @@ final readonly class ResolutionReport
             'status' => $this->status->value,
             'errors' => array_map(static fn (LearnableArchitectureError $e): array => $e->toArray(), $this->errors),
             'resolved' => $this->resolved,
+            'loadOrder' => $this->loadOrder,
             'missing' => $this->missing,
             'conflicts' => $this->conflicts,
             'warnings' => $this->warnings,
