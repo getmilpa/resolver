@@ -15,7 +15,7 @@ use Milpa\Attributes\PluginMetadata;
 #[PluginMetadata(
     version: '2.0.0',
     author: 'Milpa Team',
-    site: 'https://teamx.agency',
+    site: 'https://example.com',
     name: 'milpa/oauthplugin',
     type: 'Service',
     provides: [

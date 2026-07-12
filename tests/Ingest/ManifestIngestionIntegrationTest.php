@@ -24,7 +24,7 @@ final class ManifestIngestionIntegrationTest extends TestCase
         $manifest = (new ManifestLoader())->load(__DIR__ . '/../Fixtures/oauthplugin.milpa.json');
 
         $host = new HostProfile(
-            name: 'teamx-crm',
+            name: 'acme-crm',
             version: '2026.07',
             requiredCapabilities: ['Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface'],
             allowedLegacyContracts: ['*'],
@@ -64,7 +64,7 @@ final class ManifestIngestionIntegrationTest extends TestCase
         $manifest = (new ManifestLoader())->load(__DIR__ . '/../Fixtures/oauthplugin.milpa.json');
 
         $host = new HostProfile(
-            name: 'teamx-crm',
+            name: 'acme-crm',
             version: '2026.07',
             requiredCapabilities: ['Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface'],
             allowedLegacyContracts: [],

@@ -226,14 +226,14 @@ A requirement that closed cleanly — the positive record of what the graph wire
 
 #### `migrationHints[]`
 
-Emitted alongside a legacy contract — how to migrate off it.
+Emitted alongside a legacy path — a contract or a capability — telling you how to migrate off it.
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `id` | `string` | The contract id being migrated. |
-| `from` | `string` | The legacy implementation's version. |
-| `to` | `?string` | The canonical contract version to migrate to; `null` if no contract manifest declares one. |
-| `migrationUrl` | `?string` | The Academy migration URL; `null` if none is declared. |
+| `id` | `string` | The contract or capability id being migrated. |
+| `from` | `string` | The legacy implementation's (or provider's) version. |
+| `to` | `?string` | The migration target: the canonical contract version for a legacy contract, or `capabilities.*` for a legacy capability; `null` when a legacy contract has no contract manifest declaring one. |
+| `migrationUrl` | `?string` | The Academy migration URL; `null` if none is declared (always `null` for a capability hint). |
 | `message` | `string` | A one-line migration instruction. |
 
 #### `learnLinks[]`
@@ -248,8 +248,9 @@ The Academy links a resolved contract carries along (at least one of `academy`/`
 
 #### `errors[]`
 
-The learnable error attached to every blocking entry and every catalog-coded warning — the agent
-shape of spec §20. Leads the report (right after `status`) so a reader sees the diagnosis first.
+The learnable error attached to every blocking entry, every catalog-coded warning, and every
+permitted legacy path (its `MILPA_LEGACY_CONTRACT_ACTIVE` lesson — allowed, but never silent) — the
+agent shape of spec §20. Leads the report (right after `status`) so a reader sees the diagnosis first.
 
 | Field | Type | Semantics |
 |-------|------|-----------|

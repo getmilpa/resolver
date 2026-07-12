@@ -263,6 +263,20 @@ final class GraphResolver implements ArchitectureResolver
                 if (!$permitted) {
                     $missing[] = $this->legacyNotAllowed('capability', $req['id'], $chosen['label'], $host);
                 }
+                // A legacy capability teaches its own migration, exactly as a legacy contract does: one
+                // hint per entry, targeting the canonical `capabilities.*` shape. Emitted whenever the
+                // path is legacy-shaped (permitted or not), mirroring the contract branch — an
+                // un-permitted path is still worth telling the reader how to get off legacy.
+                $migrationHints[] = [
+                    'id' => $req['id'],
+                    'from' => $chosen['version'],
+                    'to' => 'capabilities.*',
+                    'migrationUrl' => null,
+                    'message' => sprintf(
+                        'Capability "%s" is provided by a legacy-shaped manifest; migrate it to the canonical capabilities.* shape.',
+                        $req['id'],
+                    ),
+                ];
             }
         }
 
@@ -344,10 +358,11 @@ final class GraphResolver implements ArchitectureResolver
         // Paso 5 — status.
         $status = $this->determineStatus($missing, $conflicts, $legacy, $warnings);
 
-        // Attach a learnable error to every blocking entry and every catalog-coded warning (spec §12,
-        // §20) — the seam is here, in the engine, because only the engine knows each entry's semantics
-        // and context; the report stays a passive, deterministically-serializable holder.
-        $errors = $this->attachErrors($missing, $conflicts, $warnings, $host);
+        // Attach a learnable error to every blocking entry, every catalog-coded warning, and every
+        // PERMITTED legacy path (spec §12, §20) — the seam is here, in the engine, because only the
+        // engine knows each entry's semantics and context; the report stays a passive,
+        // deterministically-serializable holder.
+        $errors = $this->attachErrors($missing, $conflicts, $warnings, $legacy, $host);
 
         return new ResolutionReport(
             status: $status,
@@ -368,21 +383,34 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * Build the learnable errors for the report's agent shape: one per blocking missing/conflict entry
-     * and one per catalog-coded warning. Warnings whose code has no catalog entry (e.g. an ad-hoc
-     * surface warning) get none — attaching a lesson-less error would be a "dead error" (anti-pattern 4).
+     * Build the learnable errors for the report's agent shape: one per blocking missing/conflict entry,
+     * one per catalog-coded warning, and one per PERMITTED legacy path. Warnings whose code has no
+     * catalog entry (e.g. an ad-hoc surface warning) get none — attaching a lesson-less error would be a
+     * "dead error" (anti-pattern 4).
+     *
+     * The legacy attachment is scoped to PERMITTED entries. A permitted legacy path degrades to
+     * legacy_compatible and is genuinely active, so its `MILPA_LEGACY_CONTRACT_ACTIVE` lesson ("allowed,
+     * but never silent") belongs in errors[]. An un-permitted legacy path is BLOCKED, not active: it
+     * already teaches through its `missing[]` twin (`MILPA_LEGACY_NOT_ALLOWED`), so re-attaching an
+     * "active" lesson would be both a duplicate for the same underlying entry and a contradiction.
      *
      * @param list<array<string, mixed>> $missing
      * @param list<array<string, mixed>> $conflicts
      * @param list<array<string, mixed>> $warnings
+     * @param list<array<string, mixed>> $legacy
      *
      * @return list<LearnableArchitectureError>
      */
-    private function attachErrors(array $missing, array $conflicts, array $warnings, HostProfile $host): array
+    private function attachErrors(array $missing, array $conflicts, array $warnings, array $legacy, HostProfile $host): array
     {
         $hostLabel = sprintf('%s@%s', $host->name, $host->version);
+        $permittedLegacy = array_values(array_filter(
+            $legacy,
+            static fn (array $entry): bool => ($entry['permitted'] ?? false) === true,
+        ));
+
         $errors = [];
-        foreach ([...$missing, ...$conflicts, ...$warnings] as $entry) {
+        foreach ([...$missing, ...$conflicts, ...$warnings, ...$permittedLegacy] as $entry) {
             $code = is_string($entry['code'] ?? null) ? $entry['code'] : '';
             if (!ErrorCatalog::has($code)) {
                 continue;

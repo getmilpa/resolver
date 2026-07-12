@@ -746,7 +746,7 @@ final class GraphResolverTest extends TestCase
     public function testHostProfileMetadataPassesThroughToReport(): void
     {
         $input = new ResolutionInput(
-            hostProfile: new HostProfile('teamx-crm', '2026.07', metadata: ['env' => 'prod', 'region' => 'mx']),
+            hostProfile: new HostProfile('acme-crm', '2026.07', metadata: ['env' => 'prod', 'region' => 'mx']),
             versionManifests: [],
             contractManifests: [],
             capabilityProvisions: [],
@@ -755,7 +755,7 @@ final class GraphResolverTest extends TestCase
 
         $report = $this->resolve($input);
 
-        self::assertSame('teamx-crm@2026.07', $report->metadata['hostProfile']);
+        self::assertSame('acme-crm@2026.07', $report->metadata['hostProfile']);
         self::assertSame(['env' => 'prod', 'region' => 'mx'], $report->metadata['hostMetadata']);
     }
 

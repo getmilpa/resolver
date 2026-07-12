@@ -52,11 +52,11 @@ final class ErrorCatalogTest extends TestCase
     {
         $error = ErrorCatalog::for('MILPA_LEGACY_NOT_ALLOWED', [
             'id' => 'command.host',
-            'hostProfile' => 'teamx-crm@2026.07',
+            'hostProfile' => 'acme-crm@2026.07',
         ]);
 
         self::assertStringContainsString('command.host', $error->message);
-        self::assertStringContainsString('teamx-crm@2026.07', $error->message);
+        self::assertStringContainsString('acme-crm@2026.07', $error->message);
 
         $fixes = implode("\n", $error->fixes);
         self::assertStringContainsString('allowedLegacyContracts', $fixes);
