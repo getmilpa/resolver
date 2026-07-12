@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/getmilpa/resolver/compare/v0.2.1...v0.3.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* the report orders the boot — loadOrder[], learnable cycles, manifest drift, requiredBy attribution
+
+### Features
+
+* the report orders the boot — loadOrder[], learnable cycles, manifest drift, requiredBy attribution ([4a143ee](https://github.com/getmilpa/resolver/commit/4a143ee6d277dd10befe086694d8ed2cf77f22b2))
+
 ## [0.2.1](https://github.com/getmilpa/resolver/compare/v0.2.0...v0.2.1) (2026-07-12)
 
 
