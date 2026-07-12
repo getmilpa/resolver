@@ -58,7 +58,13 @@ final readonly class ResolutionReport
     }
 
     /**
-     * Rehydrate a report from its serialized array form.
+     * Rehydrate a report from its serialized array form. Round-trip contract (frozen in
+     * ReportShapeContractsTest): `toArray(fromArray(toArray($r)))` is byte-identical to
+     * `toArray($r)` for every engine-emitted report. At the malformed boundary it is DEFENSIVE by
+     * design — a non-record entry inside a list is dropped and a non-map `metadata` collapses to
+     * `[]`, so rehydration never propagates a shape the engine could not have emitted — and each
+     * error's `recommendedActions` is derived state, re-computed from its code + context rather
+     * than read back.
      *
      * @param array<string, mixed> $data
      *

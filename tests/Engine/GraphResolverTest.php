@@ -70,7 +70,9 @@ final class GraphResolverTest extends TestCase
             version: '0.1.0',
             contracts: ['implements' => ['milpa.command@0.1']],
             capabilities: [
-                'provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0']],
+                // The same id also arrives as a typed provision below — the two ingestion paths
+                // deliberately coexist here, so both records opt out of §3.1's exclusive default.
+                'provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0', 'exclusive' => false]],
                 'requires' => [],
                 'suggests' => ['audit.sink'],
             ],
@@ -80,7 +82,7 @@ final class GraphResolverTest extends TestCase
             hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.provider']),
             versionManifests: [$manifest],
             contractManifests: [],
-            capabilityProvisions: [new CapabilityProvision('command.provider', 'Cmd', '0.1.0')],
+            capabilityProvisions: [new CapabilityProvision('command.provider', 'Cmd', '0.1.0', exclusive: false)],
             capabilityRequirements: [],
         );
 

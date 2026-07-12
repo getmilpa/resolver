@@ -32,8 +32,9 @@ use Milpa\ValueObjects\Capability\CapabilityProvision;
  *
  * It runs the algorithm of spec §11 pasos 2-5: resolve required contracts against the implementations
  * declared by installed packages (semver-checked, legacy-aware), resolve required and suggested
- * capabilities against the available providers (constraint-checked, honouring `oneOf` and detecting
- * `exclusive` conflicts), resolve each active surface's requirements, and classify the whole graph as
+ * capabilities against the available providers (constraint-checked, priority-ordered per spec §3.1,
+ * honouring `oneOf` and detecting `exclusive` conflicts), resolve each active surface's requirements,
+ * and classify the whole graph as
  * `valid`, `bootable_with_warnings`, `legacy_compatible`, or `blocked`. Error codes travel as plain
  * strings on the report entries; milpa/resolver's learnable-error catalog is layered on top of them.
  *
@@ -53,6 +54,7 @@ final class GraphResolver implements ArchitectureResolver
     private const CODE_CONTRACT_MISSING = 'MILPA_CONTRACT_MISSING';
     private const CODE_CONTRACT_VERSION_UNSUPPORTED = 'MILPA_CONTRACT_VERSION_UNSUPPORTED';
     private const CODE_CAPABILITY_MISSING = 'MILPA_CAPABILITY_MISSING';
+    private const CODE_CAPABILITY_VERSION_UNSUPPORTED = 'MILPA_CAPABILITY_VERSION_UNSUPPORTED';
     private const CODE_CAPABILITY_CONFLICT = 'MILPA_CAPABILITY_CONFLICT';
     private const CODE_SURFACE_REQUIREMENT_UNMET = 'MILPA_SURFACE_REQUIREMENT_UNMET';
     private const CODE_SURFACE_NOT_ENABLED = 'MILPA_SURFACE_NOT_ENABLED';
@@ -185,6 +187,7 @@ final class GraphResolver implements ArchitectureResolver
                         'exclusive' => false,
                         'label' => $label,
                         'legacy' => false,
+                        'priority' => 0,
                     ];
                 }
                 foreach ($contract->requiresCapabilities as $capabilityId) {
@@ -209,7 +212,12 @@ final class GraphResolver implements ArchitectureResolver
         // Contract-provided capabilities become available providers for the capability pass.
         $providers = [...$providers, ...$this->dedupeProviders($contractProviders)];
 
-        // Paso 3 — capabilities.
+        // Paso 3 — capabilities. A requirement whose oneOf alternatives are ALL exhausted keeps the
+        // frozen missing[] entry shape; the alternatives it tried — and, for a version miss, WHICH
+        // candidates exist only out of range — ride into the learnable error's context via this side
+        // index (keyed exactly like the requirement dedupe key), never onto the report entry itself.
+        /** @var array<string, array{alternatives: list<string>, provided: list<string>}> $oneOfMissed */
+        $oneOfMissed = [];
         $requirements = $this->collectCapabilityRequirements($input, $requireOwners, $contractRequirements);
         foreach ($requirements as $req) {
             $candidates = array_values(array_filter(
@@ -222,6 +230,14 @@ final class GraphResolver implements ArchitectureResolver
             ));
 
             if ($satisfying === []) {
+                if ($req['oneOf'] !== []) {
+                    $providedIds = array_values(array_unique(array_column($candidates, 'id')));
+                    sort($providedIds);
+                    $oneOfMissed[$req['id'] . "\0" . $req['constraint'] . "\0" . $req['requiredBy']] = [
+                        'alternatives' => $req['oneOf'],
+                        'provided' => $providedIds,
+                    ];
+                }
                 $missing[] = [
                     'kind' => 'capability',
                     'id' => $req['id'],
@@ -229,9 +245,11 @@ final class GraphResolver implements ArchitectureResolver
                     'level' => RequirementLevel::Required->value,
                     'requiredBy' => $req['requiredBy'],
                     'surface' => null,
+                    // A capability provided only OUT of the consumer's range is a capability-side
+                    // version miss — its own code, no longer recycling the contract version code.
                     'code' => $candidates === []
                         ? self::CODE_CAPABILITY_MISSING
-                        : self::CODE_CONTRACT_VERSION_UNSUPPORTED,
+                        : self::CODE_CAPABILITY_VERSION_UNSUPPORTED,
                     'reason' => $candidates === []
                         ? sprintf('No active provider offers the capability "%s".', $req['id'])
                         : sprintf(
@@ -307,13 +325,22 @@ final class GraphResolver implements ArchitectureResolver
                 continue;
             }
 
+            // The degradation is visible: a suggestion record that declares `fallback` carries it on
+            // the entry and names the path in the message; a legacy bare-FQCN suggestion has none.
             $warnings[] = [
                 'kind' => 'suggested-capability',
                 'id' => $sug['id'],
                 'surface' => null,
                 'code' => self::CODE_SUGGESTED_CAPABILITY_MISSING,
                 'requiredBy' => $sug['requiredBy'],
-                'message' => sprintf('Suggested capability "%s" has no provider; its fallback path applies.', $sug['id']),
+                'fallback' => $sug['fallback'],
+                'message' => $sug['fallback'] === null
+                    ? sprintf('Suggested capability "%s" has no provider; its fallback path applies.', $sug['id'])
+                    : sprintf(
+                        'Suggested capability "%s" has no provider; its fallback path applies: degrades to "%s".',
+                        $sug['id'],
+                        $sug['fallback'],
+                    ),
             ];
         }
 
@@ -326,6 +353,7 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => null,
                 'code' => self::CODE_DEPRECATED_CONTRACT_USED,
                 'requiredBy' => $deprecation['requiredBy'],
+                'fallback' => null,
                 'message' => sprintf(
                     'Package "%s" declares "%s" as deprecated; migrate off it before it is removed.',
                     $deprecation['requiredBy'],
@@ -378,7 +406,7 @@ final class GraphResolver implements ArchitectureResolver
         // PERMITTED legacy path (spec §12, §20) — the seam is here, in the engine, because only the
         // engine knows each entry's semantics and context; the report stays a passive,
         // deterministically-serializable holder.
-        $errors = $this->attachErrors($missing, $conflicts, $warnings, $legacy, $host);
+        $errors = $this->attachErrors($missing, $conflicts, $warnings, $legacy, $host, $oneOfMissed);
 
         return new ResolutionReport(
             status: $status,
@@ -411,14 +439,15 @@ final class GraphResolver implements ArchitectureResolver
      * already teaches through its `missing[]` twin (`MILPA_LEGACY_NOT_ALLOWED`), so re-attaching an
      * "active" lesson would be both a duplicate for the same underlying entry and a contradiction.
      *
-     * @param list<array<string, mixed>> $missing
-     * @param list<array<string, mixed>> $conflicts
-     * @param list<array<string, mixed>> $warnings
-     * @param list<array<string, mixed>> $legacy
+     * @param list<array<string, mixed>>                                               $missing
+     * @param list<array<string, mixed>>                                               $conflicts
+     * @param list<array<string, mixed>>                                               $warnings
+     * @param list<array<string, mixed>>                                               $legacy
+     * @param array<string, array{alternatives: list<string>, provided: list<string>}> $oneOfMissed
      *
      * @return list<LearnableArchitectureError>
      */
-    private function attachErrors(array $missing, array $conflicts, array $warnings, array $legacy, HostProfile $host): array
+    private function attachErrors(array $missing, array $conflicts, array $warnings, array $legacy, HostProfile $host, array $oneOfMissed): array
     {
         $hostLabel = sprintf('%s@%s', $host->name, $host->version);
         $permittedLegacy = array_values(array_filter(
@@ -432,27 +461,68 @@ final class GraphResolver implements ArchitectureResolver
             if (!ErrorCatalog::has($code)) {
                 continue;
             }
-            $errors[] = ErrorCatalog::for($code, $this->errorContext($entry, $hostLabel));
+            $errors[] = ErrorCatalog::for($code, $this->errorContext($entry, $hostLabel, $oneOfMissed));
         }
 
         return $errors;
     }
 
     /**
-     * The context handed to the catalog for a report entry: its identifying fields, in a fixed order,
-     * plus the host profile label — enough for the catalog to template the message and derive actions.
+     * The context handed to the catalog for a report entry: its identifying fields in a FIXED key
+     * order — `id`, `constraint`, `oneOf`, `surface`, `requiredBy`, `providedBy`, `fallback`,
+     * `hostProfile` — enough for the catalog to template the message and derive actions. A key with
+     * nothing to say is omitted, never null: `oneOf` joins only for a missed CAPABILITY requirement
+     * that declared alternatives (looked up by the requirement's identity — id/constraint/requiredBy
+     * — so the frozen missing[] entry shape never carries it), and `fallback` only rides on a
+     * suggested-capability warning whose record declared one. The order is deliberate and stable:
+     * the requirement identity first (id, constraint, and the oneOf alternatives that widen it),
+     * then where (surface), then the two parties (requiredBy, providedBy), then the degradation
+     * path, and the host label last. `providedBy` carries the entry's own value when it has one
+     * (a conflict's candidate list, a legacy path's provider); for a version-missed oneOf
+     * requirement — where the entry carries none — it names the candidate ids that exist only OUT
+     * of the consumer's range, so the error can say WHICH candidate fell out instead of implying
+     * the primary id "is provided".
      *
-     * @param array<string, mixed> $entry
+     * @param array<string, mixed>                                                     $entry
+     * @param array<string, array{alternatives: list<string>, provided: list<string>}> $oneOfMissed
      *
      * @return array<string, mixed>
      */
-    private function errorContext(array $entry, string $hostLabel): array
+    private function errorContext(array $entry, string $hostLabel, array $oneOfMissed): array
     {
         $context = [];
-        foreach (['id', 'constraint', 'surface', 'requiredBy', 'providedBy'] as $key) {
+        foreach (['id', 'constraint'] as $key) {
             if (array_key_exists($key, $entry) && $entry[$key] !== null) {
                 $context[$key] = $entry[$key];
             }
+        }
+
+        $miss = null;
+        if (($entry['kind'] ?? null) === 'capability'
+            && is_string($entry['id'] ?? null)
+            && is_string($entry['constraint'] ?? null)
+            && is_string($entry['requiredBy'] ?? null)
+        ) {
+            $miss = $oneOfMissed[$entry['id'] . "\0" . $entry['constraint'] . "\0" . $entry['requiredBy']] ?? null;
+        }
+        if ($miss !== null) {
+            $context['oneOf'] = $miss['alternatives'];
+        }
+
+        foreach (['surface', 'requiredBy'] as $key) {
+            if (array_key_exists($key, $entry) && $entry[$key] !== null) {
+                $context[$key] = $entry[$key];
+            }
+        }
+
+        if (array_key_exists('providedBy', $entry) && $entry['providedBy'] !== null) {
+            $context['providedBy'] = $entry['providedBy'];
+        } elseif ($miss !== null && $miss['provided'] !== []) {
+            $context['providedBy'] = $miss['provided'];
+        }
+
+        if (array_key_exists('fallback', $entry) && $entry['fallback'] !== null) {
+            $context['fallback'] = $entry['fallback'];
         }
         $context['hostProfile'] = $hostLabel;
 
@@ -489,9 +559,10 @@ final class GraphResolver implements ArchitectureResolver
 
     /**
      * Build the provider set: the typed provisions plus every provider synthesised from a version
-     * manifest's `capabilities.provides`, each tagged with whether its manifest is legacy-shaped.
+     * manifest's `capabilities.provides`, each tagged with whether its manifest is legacy-shaped and
+     * carrying its declared `priority` (absent = 0) — the field {@see pickProvider()} orders by.
      *
-     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}>
+     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}>
      */
     private function collectProviders(ResolutionInput $input): array
     {
@@ -504,6 +575,7 @@ final class GraphResolver implements ArchitectureResolver
                 'exclusive' => $provision->exclusive,
                 'label' => $provision->service ?? sprintf('%s@%s', $provision->id, $provision->contractVersion),
                 'legacy' => false,
+                'priority' => $provision->priority,
             ];
         }
 
@@ -521,6 +593,7 @@ final class GraphResolver implements ArchitectureResolver
                     'exclusive' => $provision->exclusive,
                     'label' => $provision->service ?? $package,
                     'legacy' => $legacy,
+                    'priority' => $provision->priority,
                 ];
             }
         }
@@ -529,9 +602,9 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}> $providers
+     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
      *
-     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}>
+     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}>
      */
     private function dedupeProviders(array $providers): array
     {
@@ -694,23 +767,26 @@ final class GraphResolver implements ArchitectureResolver
 
     /**
      * Suggested capabilities: every manifest's `capabilities.suggests` plus the resolved contracts'.
+     * Each carries the `fallback` its suggestion record declares (the graceful-degradation path of
+     * {@see \Milpa\ValueObjects\Capability\CapabilitySuggestion}) — `null` for a legacy bare-FQCN
+     * suggestion and for contract-declared suggestions, which are plain ids.
      *
      * @param list<array{id: string, requiredBy: string}> $contractSuggestions
      *
-     * @return list<array{id: string, requiredBy: string}>
+     * @return list<array{id: string, requiredBy: string, fallback: string|null}>
      */
     private function collectSuggestions(ResolutionInput $input, array $contractSuggestions): array
     {
         $out = [];
         $seen = [];
 
-        $add = function (string $id, string $requiredBy) use (&$out, &$seen): void {
+        $add = function (string $id, string $requiredBy, ?string $fallback) use (&$out, &$seen): void {
             $key = $id . "\0" . $requiredBy;
             if (isset($seen[$key])) {
                 return;
             }
             $seen[$key] = true;
-            $out[] = ['id' => $id, 'requiredBy' => $requiredBy];
+            $out[] = ['id' => $id, 'requiredBy' => $requiredBy, 'fallback' => $fallback];
         };
 
         foreach ($input->versionManifests as $manifest) {
@@ -718,23 +794,42 @@ final class GraphResolver implements ArchitectureResolver
             foreach ($this->rawList($manifest->capabilities, 'suggests') as $entry) {
                 $id = $this->entryId($entry);
                 if ($id !== null) {
-                    $add($id, $package);
+                    $add($id, $package, $this->entryFallback($entry));
                 }
             }
         }
 
         foreach ($contractSuggestions as $suggestion) {
-            $add($suggestion['id'], $suggestion['requiredBy']);
+            $add($suggestion['id'], $suggestion['requiredBy'], null);
         }
 
         return $out;
     }
 
     /**
+     * The declared fallback of a `suggests` entry: the `fallback` key of a structured record,
+     * TRIMMED, with a blank value meaning none. Deliberately stricter than
+     * {@see \Milpa\ValueObjects\Capability\CapabilitySuggestion::fromArray()}, which keeps the
+     * string verbatim: the engine trims so a whitespace-only fallback can never surface as a blank
+     * degradation path on a warning or in a message (the trim is pinned in the suite). A legacy
+     * bare-FQCN string declares no fallback.
+     */
+    private function entryFallback(mixed $entry): ?string
+    {
+        if (!is_array($entry) || !isset($entry['fallback']) || !is_scalar($entry['fallback'])) {
+            return null;
+        }
+        $fallback = trim((string) $entry['fallback']);
+
+        return $fallback === '' ? null : $fallback;
+    }
+
+    /**
      * Detect exclusive conflicts: an id claimed by two or more distinct providers where at least one
-     * marks the capability exclusive.
+     * marks the capability exclusive. Priority never rescues an exclusive conflict — exclusivity is a
+     * claim about the id, not a tie for `pickProvider()` to break.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}> $providers
+     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
      *
      * @return list<array<string, mixed>>
      */
@@ -777,8 +872,12 @@ final class GraphResolver implements ArchitectureResolver
      * `Milpa\Plugin\ContractResolver::getLoadOrder()`, its semantics replicated exactly over the
      * exact-string capability/contract ids the engine already matches:
      *
-     *  - the id→provider map takes the LAST provider in input order (a duplicated non-exclusive
-     *    provider silently wins as the edge source — the legacy behaviour, documented);
+     *  - the id→provider map follows {@see pickProvider()}'s winner where `priority` is in play: the
+     *    highest-priority provider of an id is the edge source, so a dependent boots after the
+     *    provider that actually satisfies it (the selection/ordering consistency invariant). On a
+     *    priority TIE — including the no-priority case, where every provider sits at 0 — the LAST
+     *    provider in input order silently wins as the edge source, byte-identical to the legacy
+     *    behaviour (a duplicated non-exclusive provider, documented);
      *  - an edge provider→dependent exists only when a provider for the required id exists (a
      *    requirement nobody provides never bends the order — the miss already lives in missing[]);
      *  - a self-dependency is skipped;
@@ -801,12 +900,20 @@ final class GraphResolver implements ArchitectureResolver
             $byName[$manifest->package] = $manifest;
         }
 
-        // id → providing package name; iterating in input order means the LAST provider wins.
+        // id → providing package name. The highest declared priority takes the edge (the same winner
+        // pickProvider() selects); on a tie — the no-priority case included, everything at 0 —
+        // iterating in input order means the LAST provider wins, exactly as the legacy resolver did.
         /** @var array<string, string> $providerById */
         $providerById = [];
+        /** @var array<string, int> $providerPriority */
+        $providerPriority = [];
         foreach ($manifests as $manifest) {
-            foreach ($this->providedIds($manifest) as $id) {
+            foreach ($this->providedIds($manifest) as ['id' => $id, 'priority' => $priority]) {
+                if (isset($providerById[$id]) && $priority < $providerPriority[$id]) {
+                    continue;
+                }
                 $providerById[$id] = $manifest->package;
+                $providerPriority[$id] = $priority;
             }
         }
 
@@ -880,11 +987,13 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * The exact-string ids a manifest provides for the ordering pass: every `capabilities.provides`
-     * capability id plus every `contracts.implements` contract id — the same ids, parsed the same
-     * way, the resolution passes above match on.
+     * The exact-string ids a manifest provides for the ordering pass — every `capabilities.provides`
+     * capability id plus every `contracts.implements` contract id, the same ids, parsed the same
+     * way, the resolution passes above match on — each paired with its declared `priority` (absent =
+     * 0; a contract implementation carries none) so the edge map can follow the same winner
+     * {@see pickProvider()} selects.
      *
-     * @return list<string>
+     * @return list<array{id: string, priority: int}>
      */
     private function providedIds(VersionManifest $manifest): array
     {
@@ -893,13 +1002,14 @@ final class GraphResolver implements ArchitectureResolver
             if (!is_string($entry) && !is_array($entry)) {
                 continue;
             }
-            $ids[] = CapabilityProvision::parse($entry)->id;
+            $provision = CapabilityProvision::parse($entry);
+            $ids[] = ['id' => $provision->id, 'priority' => $provision->priority];
         }
         foreach ($this->rawList($manifest->contracts, 'implements') as $entry) {
             if (!is_string($entry)) {
                 continue;
             }
-            $ids[] = $this->splitImplementation($entry)[0];
+            $ids[] = ['id' => $this->splitImplementation($entry)[0], 'priority' => 0];
         }
 
         return $ids;
@@ -936,8 +1046,8 @@ final class GraphResolver implements ArchitectureResolver
      * `environment.surfaces`) and carry its declared warnings; contract-declared surface needs that the
      * host has not enabled become non-blocking warnings.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}> $providers
-     * @param list<array{surface: string, requiredBy: string}>                                       $contractSurfaceNeeds
+     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
+     * @param list<array{surface: string, requiredBy: string}>                                                      $contractSurfaceNeeds
      *
      * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>, 2: list<array<string, mixed>>}
      */
@@ -989,6 +1099,7 @@ final class GraphResolver implements ArchitectureResolver
                     'surface' => $surface,
                     'code' => $code,
                     'requiredBy' => sprintf('surface:%s', $surface),
+                    'fallback' => null,
                     'message' => $message,
                 ];
             }
@@ -1016,6 +1127,7 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => $need['surface'],
                 'code' => self::CODE_SURFACE_NOT_ENABLED,
                 'requiredBy' => $need['requiredBy'],
+                'fallback' => null,
                 'message' => sprintf(
                     'Contract %s expects surface "%s", which the host has not enabled.',
                     $need['requiredBy'],
@@ -1141,17 +1253,20 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * Pick one provider from a set deterministically: prefer non-legacy, then higher priority (none
-     * here — providers carry no priority in the resolved shape), then the lexicographically first label.
+     * Pick one provider from a set deterministically — spec §3.1's "priority resolves deterministic
+     * ordering for multiple providers": the highest `priority` wins (absent = 0); a tie falls back to
+     * the previous rule — non-legacy first, then the lexicographically first label. So a set with no
+     * priorities in play resolves exactly as it did before priorities existed.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool}> $candidates
+     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $candidates
      *
-     * @return array{id: string, version: string, exclusive: bool, label: string, legacy: bool}
+     * @return array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}
      */
     private function pickProvider(array $candidates): array
     {
         usort($candidates, static function (array $a, array $b): int {
-            return [$a['legacy'] ? 1 : 0, $a['label']] <=> [$b['legacy'] ? 1 : 0, $b['label']];
+            return [-$a['priority'], $a['legacy'] ? 1 : 0, $a['label']]
+                <=> [-$b['priority'], $b['legacy'] ? 1 : 0, $b['label']];
         });
 
         return $candidates[0];
@@ -1226,6 +1341,7 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => $warning['surface'],
                 'code' => $warning['code'],
                 'requiredBy' => $warning['requiredBy'],
+                'fallback' => $warning['fallback'],
                 'accepted' => $verdict['accepted'],
                 'acceptedReason' => $verdict['reason'],
                 'acceptanceExpired' => $verdict['expired'],
@@ -1241,6 +1357,7 @@ final class GraphResolver implements ArchitectureResolver
                 'surface' => null,
                 'code' => self::CODE_RISK_EXPIRY_UNEVALUATED,
                 'requiredBy' => $this->hostLabel($host),
+                'fallback' => null,
                 'accepted' => false,
                 'acceptedReason' => null,
                 'acceptanceExpired' => false,

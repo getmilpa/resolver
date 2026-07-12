@@ -139,16 +139,73 @@ reused here rather than duplicated.
 
 ## Report shapes
 
-The `ResolutionReport` is deliberately **not** "a bag of opaque arrays": every list below has a
-**frozen entry shape** — an exact, ordered key set, a type per field, and a closed value domain where
-one applies. The shape is a public contract, enforced by
+The `ResolutionReport` is deliberately **not** "a bag of opaque arrays": the **whole serialized
+report is a frozen contract** — the top-level key order, the `status` domain, the `metadata` map,
+every list's entry shape (an exact, ordered key set, a type per field, and a closed value domain
+where one applies), and the nested shapes inside `errors[]`. The contract is enforced by
 [`tests/Report/ReportShapeContractsTest`](tests/Report/ReportShapeContractsTest.php) against
-engine-generated examples: a test fails if an entry loses a key, gains an undocumented one, or
-changes a field's type or domain. **Optional keys are always present with `null`** (never sometimes
-absent), so a consumer can read a key without guarding for its existence.
+engine-generated examples: a test fails if an entry loses a key, gains an undocumented one, changes
+a field's type or domain, or reorders the serialized keys. **Optional keys are always present with
+`null`** (never sometimes absent), so a consumer can read a key without guarding for its existence —
+the one exception is `errors[].context`, whose keys are omitted when absent (see there).
 
-Type notation: `?string` is a string or `null`; `string[]` is a list of strings; `code (catalog)` is
-one of the codes `ErrorCatalog::codes()` knows.
+Type notation: `non-empty-string` is a string that is never `""`; `?string` is a string or `null`;
+`string[]` is a list of strings; `non-empty-string (catalog)` is one of the codes
+`ErrorCatalog::codes()` knows; and a `|`-separated list of literal values is a closed domain —
+exactly those values, nothing else. The Type column of every list table below is enforced
+token-for-token against the harness schema, not just the field names.
+
+#### `ResolutionReport`
+
+`toArray()` emits exactly these keys, **in this order** — the order is part of the contract, so the
+same report renders byte-for-byte identically on the CLI, in CI, for an agent, and in the Academy.
+`errors[]` leads right after `status` so a reader sees the diagnosis first (spec §20); reordering the
+keys of a serialized report is a contract violation even with every value intact.
+
+| Key | Type | Semantics |
+|-----|------|-----------|
+| `status` | `string (status domain)` | The verdict — see the `status` domain below. |
+| `errors` | `array[]` | The learnable diagnoses (spec §20 agent shape) — see `errors[]`. |
+| `resolved` | `array[]` | What closed cleanly — see `resolved[]`. |
+| `loadOrder` | `array[]` | The boot order the graph dictates — see `loadOrder[]`. |
+| `missing` | `array[]` | What failed to close — see `missing[]`. |
+| `conflicts` | `array[]` | Exclusive-capability conflicts and dependency cycles — see `conflicts[]`. |
+| `warnings` | `array[]` | Non-blocking caveats — see `warnings[]`. |
+| `legacy` | `array[]` | Dependencies closing through legacy shapes — see `legacy[]`. |
+| `migrationHints` | `array[]` | How to migrate off each legacy path — see `migrationHints[]`. |
+| `learnLinks` | `array[]` | Academy links carried by resolved contracts — see `learnLinks[]`. |
+| `metadata` | `array` | The frozen host-identity map — see `metadata`. |
+
+> **Round-trip.** `ResolutionReport::fromArray()` rehydrates a serialized report such that
+> `toArray(fromArray(toArray($r)))` is **byte-identical** to `toArray($r)` for every engine-emitted
+> report. Two deliberate behaviours at the boundary, frozen by tests: (1) `fromArray()` is
+> *defensive* against malformed input — a non-record entry inside a list is dropped and a non-map
+> `metadata` collapses to `{}`, because rehydration must never propagate a shape the engine could not
+> have emitted; (2) `errors[].recommendedActions` is **derived state** — `fromArray()` discards the
+> serialized list and `toArray()` re-derives it deterministically from `code` + `context`, so a
+> hand-tampered action list never survives rehydration.
+
+#### `status`
+
+The closed verdict domain (spec §5) — exactly these four values, nothing else, ever:
+
+| Value | Semantics |
+|-------|-----------|
+| `valid` | The whole graph closes with no warnings. |
+| `bootable_with_warnings` | Everything required closes, but an unaccepted warning stands (a suggested capability missing, a surface caveat). |
+| `blocked` | A required contract or capability is missing, or a conflict/cycle stands — boot must not proceed. |
+| `legacy_compatible` | Required dependencies close, but through a *permitted* legacy adapter — allowed, named, never silent. |
+
+#### `metadata`
+
+The frozen host-identity map — exactly these keys, in this order. Nothing else may ride along: the
+report's free-form space is `hostMetadata` (the host profile's own metadata, passed through
+verbatim), never `metadata` itself.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `hostProfile` | `string` | The `name@version` identity of the host profile that was resolved. |
+| `hostMetadata` | `array` | The host profile's free-form metadata, passed through verbatim. |
 
 #### `missing[]`
 
@@ -158,13 +215,13 @@ A required contract, capability, surface-requirement, or un-permitted legacy pat
 | Field | Type | Semantics |
 |-------|------|-----------|
 | `kind` | `contract` \| `capability` \| `surface-requirement` \| `legacy-contract` | What kind of requirement failed to close (`legacy-contract` = a legacy path `allowedLegacyContracts` does not permit). |
-| `id` | `string` | The contract/capability id that is missing. |
+| `id` | `non-empty-string` | The contract/capability id that is missing. |
 | `constraint` | `?string` | The version constraint asked for (`*` when unversioned); `null` for a `legacy-contract` block, which is a policy denial, not a version mismatch. |
-| `level` | `RequirementLevel` | Always `required` here — a missing required item is what blocks. |
-| `requiredBy` | `string` | Who asked for it: a host-profile label, a package label, or `surface:<name>`. |
+| `level` | `required` \| `suggested` \| `optional` | Always `required` here — a missing required item is what blocks. |
+| `requiredBy` | `non-empty-string` | Who asked for it: a host-profile label, a package label, or `surface:<name>`. |
 | `surface` | `?string` | The surface name for a `surface-requirement`; `null` otherwise. |
-| `code` | `string (catalog)` | The learnable-error code (`MILPA_CONTRACT_MISSING`, `…_VERSION_UNSUPPORTED`, `…_CAPABILITY_MISSING`, `…_SURFACE_REQUIREMENT_UNMET`, `MILPA_LEGACY_NOT_ALLOWED`). |
-| `reason` | `string` | A one-line human explanation of why it did not close. |
+| `code` | `non-empty-string (catalog)` | The learnable-error code (`MILPA_CONTRACT_MISSING`, `…_CONTRACT_VERSION_UNSUPPORTED`, `…_CAPABILITY_MISSING`, `…_CAPABILITY_VERSION_UNSUPPORTED` — a capability provided only outside the consumer's range carries its own code, not the contract one — `…_SURFACE_REQUIREMENT_UNMET`, `MILPA_LEGACY_NOT_ALLOWED`). |
+| `reason` | `non-empty-string` | A one-line human explanation of why it did not close. |
 
 #### `conflicts[]`
 
@@ -174,10 +231,10 @@ packages requires each other in a dependency cycle — either way, blocks.
 | Field | Type | Semantics |
 |-------|------|-----------|
 | `kind` | `capability` \| `dependency-cycle` | An exclusive-capability conflict, or a dependency cycle with no possible boot order. |
-| `id` | `string` | The exclusive capability id claimed by more than one provider; for a cycle, the member package names (lexicographic) joined with ` <-> `. |
-| `code` | `string (catalog)` | `MILPA_CAPABILITY_CONFLICT` for a capability conflict; `MILPA_DEPENDENCY_CYCLE` for a cycle. |
+| `id` | `non-empty-string` | The exclusive capability id claimed by more than one provider; for a cycle, the member package names (lexicographic) joined with ` <-> `. |
+| `code` | `non-empty-string (catalog)` | `MILPA_CAPABILITY_CONFLICT` for a capability conflict; `MILPA_DEPENDENCY_CYCLE` for a cycle. |
 | `providedBy` | `string[]` | The conflicting provider labels, sorted — the candidates to choose between; for a cycle, each member's `name@version` identity (lexicographic). |
-| `reason` | `string` | A one-line human explanation of the conflict. |
+| `reason` | `non-empty-string` | A one-line human explanation of the conflict. |
 
 #### `warnings[]`
 
@@ -188,10 +245,11 @@ clock.
 | Field | Type | Semantics |
 |-------|------|-----------|
 | `kind` | `suggested-capability` \| `deprecation` \| `surface` \| `risk-expiry` | The kind of warning. |
-| `id` | `string` | The capability id, deprecated id, surface name, or accepted-risk code the warning is about. |
+| `id` | `non-empty-string` | The capability id, deprecated id, surface name, or accepted-risk code the warning is about. |
 | `surface` | `?string` | The surface name for a `surface` warning; `null` otherwise. |
-| `code` | `string` | The warning code — a catalog code when the engine raises it, or an author-defined code carried by a surface definition (open domain). |
-| `requiredBy` | `string` | Who surfaced the warning: a package label, `surface:<name>`, or the host-profile label. |
+| `code` | `non-empty-string` | The warning code — a catalog code when the engine raises it, or an author-defined code carried by a surface definition (open domain). |
+| `requiredBy` | `non-empty-string` | Who surfaced the warning: a package label, `surface:<name>`, or the host-profile label. |
+| `fallback` | `?string` | For a `suggested-capability` warning, the degradation path the suggestion record declares (`suggests[].fallback`, e.g. `"noop"`) — named in the `message` too (`degrades to "noop"`); `null` when the suggestion declares none (legacy bare-FQCN suggestions never do) and for every other kind. |
 | `accepted` | `bool` | Whether the host profile has accepted this risk **and** the acceptance still holds (an accepted, unexpired warning stays visible but does not degrade the status). |
 | `acceptedReason` | `?string` | The reason the host gave for accepting the risk; `null` when the warning is not accepted. Carried even when the acceptance has expired, so the report explains itself. |
 | `acceptanceExpired` | `bool` | `true` when the host accepted this risk but its `expires` date has passed against the caller's `evaluatedAt` clock — the acceptance is void and the warning degrades again. |
@@ -204,12 +262,12 @@ A dependency that closes through a legacy-shaped manifest — named so it stays 
 | Field | Type | Semantics |
 |-------|------|-----------|
 | `kind` | `contract` \| `capability` | Whether the legacy path served a contract or a capability. |
-| `id` | `string` | The contract/capability id served by the legacy manifest. |
-| `constraint` | `string` | The version constraint the legacy path satisfied (`*` for a capability). |
-| `code` | `string (catalog)` | Always `MILPA_LEGACY_CONTRACT_ACTIVE`. |
-| `providedBy` | `string` | The legacy manifest's package label (or provider service). |
+| `id` | `non-empty-string` | The contract/capability id served by the legacy manifest. |
+| `constraint` | `non-empty-string` | The version constraint the legacy path satisfied (`*` for a capability). |
+| `code` | `non-empty-string (catalog)` | Always `MILPA_LEGACY_CONTRACT_ACTIVE`. |
+| `providedBy` | `non-empty-string` | The legacy manifest's package label (or provider service). |
 | `permitted` | `bool` | Whether the host profile's `allowedLegacyContracts` permits this legacy path. When `false` the path also **blocks** — it appears in `missing[]` as a `legacy-contract` / `MILPA_LEGACY_NOT_ALLOWED` entry. |
-| `reason` | `string` | A one-line human explanation. |
+| `reason` | `non-empty-string` | A one-line human explanation. |
 
 #### `resolved[]`
 
@@ -218,12 +276,21 @@ A requirement that closed cleanly — the positive record of what the graph wire
 | Field | Type | Semantics |
 |-------|------|-----------|
 | `kind` | `contract` \| `capability` \| `surface` | What kind of requirement closed. |
-| `id` | `string` | The contract/capability id or surface name that closed. |
-| `constraint` | `string` | The version constraint satisfied (`*` when unversioned). |
-| `level` | `RequirementLevel` | `required` or `suggested` (a satisfied suggestion is reported here too). |
-| `requiredBy` | `string` | Who asked for it: a host-profile label, a package label, `contract:<id>@<v>`, or `surface:<name>`. |
-| `providedBy` | `string` | The provider that closed it: a service, a package label, or `contract:<id>@<v>`. |
+| `id` | `non-empty-string` | The contract/capability id or surface name that closed. |
+| `constraint` | `non-empty-string` | The version constraint satisfied (`*` when unversioned). |
+| `level` | `required` \| `suggested` \| `optional` | `required` or `suggested` (a satisfied suggestion is reported here too). |
+| `requiredBy` | `non-empty-string` | Who asked for it: a host-profile label, a package label, `contract:<id>@<v>`, or `surface:<name>`. |
+| `providedBy` | `non-empty-string` | The provider that closed it: a service, a package label, or `contract:<id>@<v>`. |
 | `via` | `direct` \| `legacy` \| `oneOf` | How it closed: a direct provider, a legacy adapter, or a `oneOf` alternative. |
+
+> **Provider selection is deterministic** — spec §3.1's "priority resolves deterministic ordering
+> for multiple providers", verbatim. When several providers offer the same non-exclusive id, the
+> winner of `providedBy` is chosen by **`priority` descending** (a provision's declared `priority`,
+> absent = 0), then **non-legacy before legacy**, then the **lexicographically first label**. The
+> `loadOrder[]` edge follows the **same winner**: when priority selects a provider, its dependents
+> boot after *that* provider — you boot after whoever satisfies you. Priority never rescues an
+> **exclusive** conflict: two providers claiming the same exclusive id still block with
+> `MILPA_CAPABILITY_CONFLICT`, whatever their priorities.
 
 #### `loadOrder[]`
 
@@ -234,11 +301,14 @@ sort lexicographically, because its sequence IS the payload: dependencies come b
 dependents, and packages with no edges between them keep the exact order the host configured. It is
 still fully deterministic (a pure function of the input order). The members of a dependency cycle
 are excluded — they appear in `conflicts[]` as a `dependency-cycle` entry instead — while every
-non-cyclic package keeps its place.
+non-cyclic package keeps its place. When several packages provide the same id, the edge source is
+the **highest-`priority` provider** — the same winner provider selection picks for `resolved[]` —
+and on a priority tie (the no-priority case included) the **last provider in input order** wins,
+byte-identical to the legacy `ContractResolver` semantics.
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `name` | `string` | The package name, in boot position — the runtime maps it to its plugin record. |
+| `name` | `non-empty-string` | The package name, in boot position — the runtime maps it to its plugin record. |
 | `version` | `string` | The package version, completing the `name@version` identity `coa inspect` and agents consume. |
 
 #### `migrationHints[]`
@@ -247,11 +317,11 @@ Emitted alongside a legacy path — a contract or a capability — telling you h
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `id` | `string` | The contract or capability id being migrated. |
-| `from` | `string` | The legacy implementation's (or provider's) version. |
+| `id` | `non-empty-string` | The contract or capability id being migrated. |
+| `from` | `non-empty-string` | The legacy implementation's (or provider's) version. |
 | `to` | `?string` | The migration target: the canonical contract version for a legacy contract, or `capabilities.*` for a legacy capability; `null` when a legacy contract has no contract manifest declaring one. |
 | `migrationUrl` | `?string` | The Academy migration URL; `null` if none is declared (always `null` for a capability hint). |
-| `message` | `string` | A one-line migration instruction. |
+| `message` | `non-empty-string` | A one-line migration instruction. |
 
 #### `learnLinks[]`
 
@@ -259,7 +329,7 @@ The Academy links a resolved contract carries along (at least one of `academy`/`
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `id` | `string` | The contract id the links belong to. |
+| `id` | `non-empty-string` | The contract id the links belong to. |
 | `academy` | `?string` | The Academy lesson URL, or `null`. |
 | `migration` | `?string` | The Academy migration URL, or `null`. |
 
@@ -272,7 +342,15 @@ agent shape of spec §20. Leads the report (right after `status`) so a reader se
 **Errors attribute their requirer**: when a *package* (`vendor/package@x.y.z`) or a *contract*
 (`contract:<id>@<v>`) — not the host profile — asked for a missing capability, the `message` names it
 (`acme/crm@1.2.0 requires the capability "crm.mailer", …`), so the reader learns *who* opened the
-graph, not just what is absent. Host-origin entries keep the `The host profile …` phrasing.
+graph, not just what is absent. The attribution covers **both version codes** too, as a consistent
+pair (`acme/crm@1.2.0 requires the contract "milpa.persistence"; it is implemented, but …`).
+Host-origin entries keep the `The host profile …` phrasing.
+**A `oneOf` requirement that exhausts every candidate teaches its whole search space**: the error's
+`context.oneOf` lists the alternatives tried (the frozen `missing[]` entry never carries them) and
+the message enumerates every candidate — `… but none of ["log.sink", "log.file", "log.syslog"]
+provides it.` When the only existing candidates sit **out of range**, the version-miss message names
+them instead of implying the primary id is provided — `The capability "log.sink" is provided only
+through ["log.syslog"], but no provider's contractVersion satisfies the constraint "^2.0".`
 `MILPA_MANIFEST_DRIFT` is **caller-emitted** rather than engine-emitted: it is built by
 `DriftDetector::toLearnableErrors()` when a package's `milpa.json` no longer matches its
 `#[PluginMetadata]`. Consumers render any report's diagnosis with
@@ -282,13 +360,76 @@ is empty.
 
 | Field | Type | Semantics |
 |-------|------|-----------|
-| `code` | `string (catalog)` | The learnable-error code. |
-| `message` | `string` | The human-readable diagnosis for this occurrence. |
-| `why` | `string` | The concept the failure violated — what to learn from it. |
-| `context` | `array` | The identifying fields that produced the error (id, constraint, surface, requiredBy, providedBy, hostProfile), free-form by design. |
+| `code` | `non-empty-string (catalog)` | The learnable-error code. |
+| `message` | `non-empty-string` | The human-readable diagnosis for this occurrence. |
+| `why` | `non-empty-string` | The concept the failure violated — what to learn from it. |
+| `context` | `array` | The identifying fields that produced the error — engine-emitted contexts follow the endorsed key order frozen in `errors[].context` below. |
 | `fixes` | `string[]` | Human-readable ways to resolve it. |
-| `recommendedActions` | `array[]` | Typed, machine-actionable recommendations derived from the code and context. |
-| `learn` | `array` | The bilingual Academy links map (`academy`/`artifact`/`llms`, each `{es, en}`). |
+| `recommendedActions` | `array[]` | Typed, machine-actionable recommendations derived from the code and context — the entry shape and type domain are frozen in `errors[].recommendedActions[]` below. |
+| `learn` | `array` | The bilingual Academy links map, frozen in `errors[].learn` below. |
+
+#### `errors[].context`
+
+Every **engine-emitted** context carries its keys in one endorsed order: the requirement identity
+first (`id`, `constraint`, and the `oneOf` alternatives that widen it), then where (`surface`), then
+the two parties (`requiredBy`, `providedBy`), then the degradation path (`fallback`), and the host
+label last. Keys are **optional** — a field with nothing to say is *omitted*, never `null` — but when
+present they appear in exactly this relative order. `id` and `hostProfile` are always present.
+
+**Exemption**: `MILPA_MANIFEST_DRIFT` is caller-emitted (`DriftDetector::toLearnableErrors()`), never
+built by the engine's context pass, and carries its own frozen shape — exactly `package` (the drifted
+package label) and `fields` (the drifted field records) — outside this order on purpose: a drift
+diagnosis identifies a manifest, not a graph requirement.
+
+| Key | Type | Semantics |
+|-----|------|-----------|
+| `id` | `string` | The contract/capability/surface/risk id the error is about (always present). |
+| `constraint` | `string` | The version constraint in play, when the entry carried one. |
+| `oneOf` | `string[]` | The exhausted alternatives of a missed `oneOf` capability requirement. |
+| `surface` | `string` | The surface name, for surface-scoped errors. |
+| `requiredBy` | `string` | Who asked: a host-profile label, a package label, `contract:<id>@<v>`, `surface:<name>`, or `input`. |
+| `providedBy` | `string` \| `string[]` | The entry's provider(s) — a legacy path's provider label, a conflict's candidate list — or, on a `oneOf` version miss, the candidate ids that exist only out of range. |
+| `fallback` | `string` | The degradation path a missed suggestion declares. |
+| `hostProfile` | `string` | The host profile's `name@version` label (always present, always last). |
+
+#### `errors[].recommendedActions[]`
+
+Every entry is a typed, machine-actionable recommendation: the `type` key leads (always first), its
+value belongs to the **closed domain below**, and every other key is a code-specific string parameter
+(`candidates` is the one list of strings). The list is **derived state**, re-computed from `code` +
+`context` on every serialization — see the round-trip note above.
+
+| Action type | Semantics |
+|-------------|-----------|
+| `install-package` | Install the named canonical provider package. |
+| `enable-plugin` | Enable a plugin that supplies the named contract/capability/adapter. |
+| `disable-feature` | Disable the feature that needs the missing capability. |
+| `accept-risk` | Record the named warning code as an accepted risk in the host profile. |
+| `upgrade-package` | Upgrade the named package until it satisfies the constraint. |
+| `adjust-constraint` | Relax the requirer's constraint to admit what is installed. |
+| `choose-provider` | Pick exactly one of the `candidates` claiming an exclusive capability. |
+| `disable-surface` | Disable the named surface until its requirements have providers. |
+| `enable-surface` | Enable the named surface the contract expects. |
+| `migrate-contract` | Migrate the named contract off its legacy/deprecated shape. |
+| `allow-legacy-contract` | Add the named contract to `allowedLegacyContracts` explicitly. |
+| `update-host-profile` | Regenerate the stale host profile from the installed package set. |
+| `review-blocking-errors` | Walk the report's blocking entries — the graph must close first. |
+| `review-warnings` | Review the report's warnings and provide or accept each one. |
+| `set-evaluated-at` | Pass an `evaluatedAt` clock so accepted-risk expiries can be checked. |
+| `remove-risk-expiry` | Drop the `expires` field from the named accepted risk. |
+
+#### `errors[].learn`
+
+The bilingual Academy links map. `academy` and `llms` are **required** on every catalog-built error —
+the "no dead error" rule: every code teaches a human *and* is consumable by an agent — while
+`artifact` is optional (not every lesson has one). Every present value is exactly the bilingual pair
+`{es, en}` of live, non-empty URLs — never invented, verified against production.
+
+| Key | Type | Semantics |
+|-----|------|-----------|
+| `academy` | `{es, en}` | The Academy lesson URLs (required). |
+| `artifact` | `{es, en}` | The Academy artifact URLs (optional). |
+| `llms` | `{es, en}` | The machine-readable `llms.txt` resources (required). |
 
 ## Requirements
 

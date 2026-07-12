@@ -138,6 +138,13 @@ final readonly class LearnableArchitectureError
                 $actions[] = ['type' => 'adjust-constraint', 'contract' => $id, 'constraint' => $constraint];
                 break;
 
+            case 'MILPA_CAPABILITY_VERSION_UNSUPPORTED':
+                if ($package !== null) {
+                    $actions[] = ['type' => 'upgrade-package', 'package' => $package, 'constraint' => $constraint];
+                }
+                $actions[] = ['type' => 'adjust-constraint', 'capability' => $id, 'constraint' => $constraint];
+                break;
+
             case 'MILPA_CAPABILITY_CONFLICT':
                 $actions[] = ['type' => 'choose-provider', 'capability' => $id, 'candidates' => $this->contextList('providedBy')];
                 break;

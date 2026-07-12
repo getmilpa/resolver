@@ -16,19 +16,22 @@ use PHPUnit\Framework\TestCase;
  */
 final class ErrorCatalogTest extends TestCase
 {
-    public function testCatalogCoversTheSeventeenCodes(): void
+    public function testCatalogCoversTheEighteenCodes(): void
     {
         $codes = ErrorCatalog::codes();
 
         // The 11 initial codes of spec §13, the two ambiguity-splitting codes (T2 carry), the
         // acceptedRisks-expiry-without-a-clock code (invariantes slice T2), the
         // allowedLegacyContracts enforcement code (invariantes slice T3), the
-        // dependency-cycle code (Orden slice T1 — the boot order absorbed from Kahn), plus the
+        // dependency-cycle code (Orden slice T1 — the boot order absorbed from Kahn), the
         // manifest-drift code (Orden slice T2 — caller-emitted by DriftDetector::toLearnableErrors,
-        // never by the engine, like MILPA_ADAPTER_MISSING and MILPA_HOST_PROFILE_OUTDATED).
+        // never by the engine, like MILPA_ADAPTER_MISSING and MILPA_HOST_PROFILE_OUTDATED), plus the
+        // capability version code (Contrato slice T3 — a capability whose providers exist but none
+        // satisfies the constraint no longer recycles the CONTRACT version code).
         self::assertContains('MILPA_CONTRACT_MISSING', $codes);
         self::assertContains('MILPA_CONTRACT_VERSION_UNSUPPORTED', $codes);
         self::assertContains('MILPA_CAPABILITY_MISSING', $codes);
+        self::assertContains('MILPA_CAPABILITY_VERSION_UNSUPPORTED', $codes);
         self::assertContains('MILPA_CAPABILITY_CONFLICT', $codes);
         self::assertContains('MILPA_SURFACE_REQUIREMENT_UNMET', $codes);
         self::assertContains('MILPA_ADAPTER_MISSING', $codes);
@@ -44,8 +47,185 @@ final class ErrorCatalogTest extends TestCase
         self::assertContains('MILPA_DEPENDENCY_CYCLE', $codes);
         self::assertContains('MILPA_MANIFEST_DRIFT', $codes);
 
-        self::assertCount(17, $codes);
+        self::assertCount(18, $codes);
         self::assertSame(array_values(array_unique($codes)), $codes, 'codes are unique');
+    }
+
+    /**
+     * The capability version code is fully teachable (Contrato slice T3): its own why (the provider
+     * exists, but its contractVersion misses the consumer's range), fixes that name BOTH sides of the
+     * mismatch (upgrade the provider / relax the constraint, templated with id + constraint), and the
+     * LIVE contratos-grafo unit plus the #siembra artifact — the same lesson family as the other
+     * graph-opening codes, never an invented URL. Contrato T4 attribution parity: this context's
+     * requiredBy is a PACKAGE, so the message now names it (the expected string was redefined by that
+     * decision — host-origin phrasing is frozen separately below).
+     */
+    public function testCapabilityVersionUnsupportedIsAFullyTeachableCode(): void
+    {
+        $error = ErrorCatalog::for('MILPA_CAPABILITY_VERSION_UNSUPPORTED', [
+            'id' => 'cache.store',
+            'constraint' => '^2.0',
+            'requiredBy' => 'acme/crm@1.2.0',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+
+        self::assertSame(
+            'acme/crm@1.2.0 requires the capability "cache.store"; it is provided, but no provider\'s contractVersion satisfies the constraint "^2.0".',
+            $error->message,
+        );
+        self::assertStringContainsString('contractVersion', $error->why);
+
+        self::assertSame(
+            [
+                'Upgrade a provider of "cache.store" to a contractVersion that satisfies "^2.0".',
+                'Relax the "cache.store" constraint "^2.0" on the requirer if an installed provider version is acceptable.',
+            ],
+            $error->fixes,
+        );
+
+        self::assertSame('https://academy.milpa.lat/learn/fundamentos/contratos-grafo/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/en/learn/fundamentos/contratos-grafo/', $error->links['academy']['en']);
+        self::assertSame('https://academy.milpa.lat/artifacts/#siembra', $error->links['artifact']['es']);
+        self::assertArrayHasKey('llms', $error->links);
+    }
+
+    /**
+     * Attribution PARITY on the two version codes (Contrato slice T4, the Orden-slice precedent):
+     * when `context.requiredBy` is package- or contract-origin, `MILPA_CONTRACT_VERSION_UNSUPPORTED`
+     * and `MILPA_CAPABILITY_VERSION_UNSUPPORTED` both name the requirer — a consistent pair, changed
+     * together — so a version miss teaches WHO asked for the range, exactly as the missing codes do.
+     */
+    public function testVersionMissMessagesNameThePackageRequirerOnBothCodes(): void
+    {
+        $contract = ErrorCatalog::for('MILPA_CONTRACT_VERSION_UNSUPPORTED', [
+            'id' => 'milpa.persistence',
+            'constraint' => '^2.0',
+            'requiredBy' => 'acme/crm@1.2.0',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'acme/crm@1.2.0 requires the contract "milpa.persistence"; it is implemented, but no implementation satisfies the constraint "^2.0".',
+            $contract->message,
+        );
+
+        $capability = ErrorCatalog::for('MILPA_CAPABILITY_VERSION_UNSUPPORTED', [
+            'id' => 'cache.store',
+            'constraint' => '^2.0',
+            'requiredBy' => 'contract:milpa.command@0.1',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'contract:milpa.command@0.1 requires the capability "cache.store"; it is provided, but no provider\'s contractVersion satisfies the constraint "^2.0".',
+            $capability->message,
+        );
+    }
+
+    /**
+     * Host-origin INTACT on both version codes: a `hostProfile:`-prefixed requiredBy, an absent one,
+     * and the owner-less `input` sentinel keep the original phrasing byte for byte — the parity
+     * decision touches plugin-origin messages ONLY.
+     */
+    public function testVersionMissMessagesKeepHostPhrasingForHostInputAndAbsentOrigins(): void
+    {
+        $expectedContract = 'The contract "milpa.persistence" is implemented, but no implementation satisfies the constraint "^2.0".';
+        $expectedCapability = 'The capability "cache.store" is provided, but no provider\'s contractVersion satisfies the constraint "^2.0".';
+
+        foreach (['hostProfile:agent-ready@2026.07', 'input', null] as $origin) {
+            $context = ['hostProfile' => 'agent-ready@2026.07', 'constraint' => '^2.0'];
+            if ($origin !== null) {
+                $context['requiredBy'] = $origin;
+            }
+
+            $label = $origin ?? '(absent)';
+            self::assertSame(
+                $expectedContract,
+                ErrorCatalog::for('MILPA_CONTRACT_VERSION_UNSUPPORTED', ['id' => 'milpa.persistence'] + $context)->message,
+                "contract phrasing drifted for origin {$label}",
+            );
+            self::assertSame(
+                $expectedCapability,
+                ErrorCatalog::for('MILPA_CAPABILITY_VERSION_UNSUPPORTED', ['id' => 'cache.store'] + $context)->message,
+                "capability phrasing drifted for origin {$label}",
+            );
+        }
+    }
+
+    /**
+     * The oneOf version-miss wording fix (Contrato slice T4, inherited from the T3 review): when the
+     * context carries `providedBy` — the candidates that exist only OUT of range — the message says
+     * the capability `is provided only through [...]`, naming WHICH candidate fell out of range. The
+     * bare "is provided" would mislead when the primary id has no provider at all and only a oneOf
+     * alternative is out of range.
+     */
+    public function testCapabilityVersionMissNamesTheOutOfRangeOneOfCandidate(): void
+    {
+        $error = ErrorCatalog::for('MILPA_CAPABILITY_VERSION_UNSUPPORTED', [
+            'id' => 'log.sink',
+            'constraint' => '^2.0',
+            'oneOf' => ['log.syslog'],
+            'requiredBy' => 'input',
+            'providedBy' => ['log.syslog'],
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+
+        self::assertSame(
+            'The capability "log.sink" is provided only through ["log.syslog"], but no provider\'s contractVersion satisfies the constraint "^2.0".',
+            $error->message,
+        );
+    }
+
+    /**
+     * oneOf exhausted (Contrato slice T3): when the context carries `oneOf`, the capability-missing
+     * message enumerates every candidate tried — the primary id plus each alternative — instead of
+     * pretending the search space was a single id. Attribution rules are unchanged: a package or
+     * contract requirer is named; a host/input origin keeps the host phrasing.
+     */
+    public function testCapabilityMissingMessageEnumeratesExhaustedOneOfAlternatives(): void
+    {
+        $hostOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'log.sink',
+            'oneOf' => ['log.file', 'log.syslog'],
+            'requiredBy' => 'input',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'The host profile agent-ready@2026.07 requires the capability "log.sink", but none of ["log.sink", "log.file", "log.syslog"] provides it.',
+            $hostOrigin->message,
+        );
+
+        $fromPackage = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
+            'id' => 'log.sink',
+            'oneOf' => ['log.file', 'log.syslog'],
+            'requiredBy' => 'acme/crm@1.2.0',
+            'hostProfile' => 'agent-ready@2026.07',
+        ]);
+        self::assertSame(
+            'acme/crm@1.2.0 requires the capability "log.sink", but none of ["log.sink", "log.file", "log.syslog"] provides it.',
+            $fromPackage->message,
+        );
+    }
+
+    /**
+     * Fallback degradation (Contrato slice T3): when the context carries the suggestion's declared
+     * `fallback`, the suggested-capability message appends the degradation path; without one it stays
+     * byte-identical to the pre-fallback phrasing.
+     */
+    public function testSuggestedCapabilityMissingMessageNamesTheFallbackDegradation(): void
+    {
+        $withFallback = ErrorCatalog::for('MILPA_SUGGESTED_CAPABILITY_MISSING', [
+            'id' => 'audit.sink',
+            'fallback' => 'noop',
+        ]);
+        self::assertSame(
+            'The suggested capability "audit.sink" has no provider; its fallback path applies: degrades to "noop".',
+            $withFallback->message,
+        );
+
+        $withoutFallback = ErrorCatalog::for('MILPA_SUGGESTED_CAPABILITY_MISSING', ['id' => 'audit.sink']);
+        self::assertSame(
+            'The suggested capability "audit.sink" has no provider; its fallback path applies.',
+            $withoutFallback->message,
+        );
     }
 
     /**

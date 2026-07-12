@@ -28,13 +28,24 @@ namespace Milpa\Resolver\Report;
  * expiry could not be checked because the caller supplied no clock), `MILPA_LEGACY_NOT_ALLOWED`
  * (a legacy-shaped resolution the host profile's allowlist does not permit — the enforcement of
  * `allowedLegacyContracts`), `MILPA_DEPENDENCY_CYCLE` (packages that require each other in a
- * cycle, for which no boot order exists), and `MILPA_MANIFEST_DRIFT` (a `milpa.json` that no longer
+ * cycle, for which no boot order exists), `MILPA_MANIFEST_DRIFT` (a `milpa.json` that no longer
  * matches the code's `#[PluginMetadata]` — caller-emitted by
- * {@see \Milpa\Resolver\Ingest\DriftDetector::toLearnableErrors()}, never by the engine).
+ * {@see \Milpa\Resolver\Ingest\DriftDetector::toLearnableErrors()}, never by the engine), and
+ * `MILPA_CAPABILITY_VERSION_UNSUPPORTED` (a capability whose providers exist but none satisfies
+ * the consumer's constraint — split from the CONTRACT version code so each side teaches its own
+ * upgrade path).
  *
  * Messages attribute their requirer: when `context.requiredBy` names a package or a contract, the
  * templated message names it too, so the reader learns WHO opened the graph — not just what is
- * missing. Host-origin entries (a `hostProfile:`-prefixed requiredBy) keep the host phrasing.
+ * missing. Host-origin entries (a `hostProfile:`-prefixed requiredBy) keep the host phrasing. The
+ * attribution covers the missing codes AND both version codes (`MILPA_CONTRACT_VERSION_UNSUPPORTED`
+ * / `MILPA_CAPABILITY_VERSION_UNSUPPORTED` — a consistent pair, per the Orden-slice precedent).
+ * Three context fields refine a message further: `oneOf` (a missed capability requirement's
+ * exhausted alternatives) makes the capability-missing message enumerate every candidate tried,
+ * `providedBy` on a capability version miss names WHICH oneOf candidates exist only out of range
+ * (so the message never claims the primary id "is provided" when only an alternative is), and
+ * `fallback` (a suggestion record's declared degradation path) makes the suggested-capability
+ * message name where the runtime degrades to.
  */
 final class ErrorCatalog
 {
@@ -142,6 +153,10 @@ final class ErrorCatalog
                 'why' => 'A required capability closes the architecture graph only when an installed package or plugin declares that it provides it. With no provider, the runtime cannot wire the capability and the graph stays open.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
             ],
+            'MILPA_CAPABILITY_VERSION_UNSUPPORTED' => [
+                'why' => 'A provider for the capability exists, but its contractVersion falls outside the range the consumer asked for. A version is a contract, not a label: the capability is present at the wrong version, so the requirement stays open until the provider upgrades or the constraint admits what is installed.',
+                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
+            ],
             'MILPA_CAPABILITY_CONFLICT' => [
                 'why' => 'Two or more providers claim the same capability and at least one marks it exclusive. The resolver refuses to pick silently: a hidden choice is exactly the invisible architecture the resolver exists to prevent.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
@@ -202,11 +217,12 @@ final class ErrorCatalog
     }
 
     /**
-     * Template the message for a code from the entry context. `MILPA_CAPABILITY_MISSING` attributes
-     * its requirer: a package (`vendor/package@x.y.z`) or contract (`contract:<id>@<v>`) requiredBy is
-     * named in the message; a `hostProfile:`-prefixed requiredBy, an absent one, and the owner-less
-     * `input` sentinel (a caller-supplied typed requirement no installed manifest declares — NOT a
-     * package) all keep the host phrasing.
+     * Template the message for a code from the entry context. `MILPA_CAPABILITY_MISSING` and BOTH
+     * version codes attribute their requirer per {@see namedRequirer()}: a package
+     * (`vendor/package@x.y.z`) or contract (`contract:<id>@<v>`) requiredBy is named in the message;
+     * a `hostProfile:`-prefixed requiredBy, an absent one, and the owner-less `input` sentinel (a
+     * caller-supplied typed requirement no installed manifest declares — NOT a package) all keep the
+     * host phrasing.
      *
      * @param array<string, mixed> $context
      */
@@ -221,10 +237,9 @@ final class ErrorCatalog
 
         return match ($code) {
             'MILPA_CONTRACT_MISSING' => sprintf('The host profile %s requires the contract "%s", but no installed package implements it.', $host, $id),
-            'MILPA_CONTRACT_VERSION_UNSUPPORTED' => sprintf('The contract "%s" is implemented, but no implementation satisfies the constraint "%s".', $id, $constraint),
-            'MILPA_CAPABILITY_MISSING' => $requiredBy !== '' && $requiredBy !== 'input' && !str_starts_with($requiredBy, 'hostProfile:')
-                ? sprintf('%s requires the capability "%s", but no active package or plugin provides it.', $requiredBy, $id)
-                : sprintf('The host profile %s requires the capability "%s", but no active package or plugin provides it.', $host, $id),
+            'MILPA_CONTRACT_VERSION_UNSUPPORTED' => self::contractVersionUnsupportedMessage($id, $constraint, $requiredBy),
+            'MILPA_CAPABILITY_MISSING' => self::capabilityMissingMessage($context, $id, $host, $requiredBy),
+            'MILPA_CAPABILITY_VERSION_UNSUPPORTED' => self::capabilityVersionUnsupportedMessage($context, $id, $constraint, $requiredBy),
             'MILPA_CAPABILITY_CONFLICT' => sprintf('The exclusive capability "%s" is claimed by more than one provider.', $id),
             'MILPA_SURFACE_REQUIREMENT_UNMET' => sprintf('The active surface "%s" requires the capability "%s", which no provider offers.', $surface, $id),
             'MILPA_ADAPTER_MISSING' => sprintf('The adapter "%s" that a contract expects is not installed.', $id),
@@ -235,7 +250,13 @@ final class ErrorCatalog
             'MILPA_ARCHITECTURE_GRAPH_BLOCKED' => 'The architecture graph is blocked; the host cannot boot until every required dependency closes.',
             'MILPA_BOOTABLE_WITH_WARNINGS' => 'The architecture graph closes with warnings; the host can boot once the warnings are reviewed or accepted.',
             'MILPA_SURFACE_NOT_ENABLED' => sprintf('A contract expects the surface "%s", which the host profile has not enabled.', $surface),
-            'MILPA_SUGGESTED_CAPABILITY_MISSING' => sprintf('The suggested capability "%s" has no provider; its fallback path applies.', $id),
+            'MILPA_SUGGESTED_CAPABILITY_MISSING' => self::str($context, 'fallback') === ''
+                ? sprintf('The suggested capability "%s" has no provider; its fallback path applies.', $id)
+                : sprintf(
+                    'The suggested capability "%s" has no provider; its fallback path applies: degrades to "%s".',
+                    $id,
+                    self::str($context, 'fallback'),
+                ),
             'MILPA_RISK_EXPIRY_UNEVALUATED' => sprintf('The accepted risk "%s" has an expiry, but the resolution ran without an evaluatedAt clock, so the expiry could not be checked.', $id),
             'MILPA_DEPENDENCY_CYCLE' => sprintf('The packages %s require each other in a cycle; no boot order exists.', $id),
             'MILPA_MANIFEST_DRIFT' => sprintf(
@@ -245,6 +266,99 @@ final class ErrorCatalog
             ),
             default => '',
         };
+    }
+
+    /**
+     * The requirer a message may name: the `requiredBy` itself when it is a package
+     * (`vendor/package@x.y.z`) or a contract (`contract:<id>@<v>`); `null` — keep the host phrasing —
+     * for a `hostProfile:`-prefixed origin, an absent one, and the owner-less `input` sentinel (a
+     * caller-supplied typed requirement no installed manifest declares, which is NOT a package). One
+     * predicate shared by every attributing message, so "who counts as a requirer" can never fork
+     * between codes.
+     */
+    private static function namedRequirer(string $requiredBy): ?string
+    {
+        return $requiredBy !== '' && $requiredBy !== 'input' && !str_starts_with($requiredBy, 'hostProfile:')
+            ? $requiredBy
+            : null;
+    }
+
+    /**
+     * The capability-missing message, attribution rules unchanged (a package or contract requirer is
+     * named; host/`input`/absent origins keep the host phrasing). When the context carries `oneOf` —
+     * a requirement whose alternatives were ALL exhausted — the message enumerates every candidate
+     * tried (the primary id plus each alternative), so the reader sees the whole search space instead
+     * of a single id that quietly had substitutes.
+     *
+     * @param array<string, mixed> $context
+     */
+    private static function capabilityMissingMessage(array $context, string $id, string $host, string $requiredBy): string
+    {
+        $who = self::namedRequirer($requiredBy) ?? sprintf('The host profile %s', $host);
+
+        $oneOf = self::strList($context, 'oneOf');
+        if ($oneOf === []) {
+            return sprintf('%s requires the capability "%s", but no active package or plugin provides it.', $who, $id);
+        }
+
+        return sprintf(
+            '%s requires the capability "%s", but none of ["%s"] provides it.',
+            $who,
+            $id,
+            implode('", "', [$id, ...$oneOf]),
+        );
+    }
+
+    /**
+     * The contract version-miss message. Attribution parity with the capability side (the two version
+     * codes change as a consistent pair): a package or contract requirer is NAMED — `%s requires the
+     * contract …` — while host-origin, `input`, and absent origins keep the original phrasing byte
+     * for byte.
+     */
+    private static function contractVersionUnsupportedMessage(string $id, string $constraint, string $requiredBy): string
+    {
+        $who = self::namedRequirer($requiredBy);
+        if ($who === null) {
+            return sprintf('The contract "%s" is implemented, but no implementation satisfies the constraint "%s".', $id, $constraint);
+        }
+
+        return sprintf(
+            '%s requires the contract "%s"; it is implemented, but no implementation satisfies the constraint "%s".',
+            $who,
+            $id,
+            $constraint,
+        );
+    }
+
+    /**
+     * The capability version-miss message. Two refinements over the original single phrase, neither
+     * touching the host-origin/no-oneOf case (byte-identical): (1) attribution parity — a package or
+     * contract requirer is named, exactly as {@see contractVersionUnsupportedMessage()} does; (2) when
+     * the context carries `providedBy` — a oneOf requirement whose only existing candidates sit out of
+     * range — the message says the capability `is provided only through [...]`, naming WHICH candidate
+     * fell out of range instead of implying the primary id itself "is provided" when it may have no
+     * provider at all.
+     *
+     * @param array<string, mixed> $context
+     */
+    private static function capabilityVersionUnsupportedMessage(array $context, string $id, string $constraint, string $requiredBy): string
+    {
+        $who = self::namedRequirer($requiredBy);
+        $subject = $who === null
+            ? sprintf('The capability "%s"', $id)
+            : sprintf('%s requires the capability "%s"; it', $who, $id);
+
+        $provided = self::strList($context, 'providedBy');
+        $providedClause = $provided === []
+            ? 'is provided'
+            : sprintf('is provided only through ["%s"]', implode('", "', $provided));
+
+        return sprintf(
+            '%s %s, but no provider\'s contractVersion satisfies the constraint "%s".',
+            $subject,
+            $providedClause,
+            $constraint,
+        );
     }
 
     /**
@@ -279,6 +393,14 @@ final class ErrorCatalog
                     : sprintf('Install a package that provides "%s".', $id),
                 sprintf('Enable a plugin that provides "%s".', $id),
                 sprintf('Remove "%s" from the host profile if the capability is not needed.', $id),
+            ],
+            // Both sides of the version mismatch are named: upgrade the PROVIDER (the known package
+            // when the id has a canonical one), or relax the REQUIRER's constraint.
+            'MILPA_CAPABILITY_VERSION_UNSUPPORTED' => [
+                $package !== null
+                    ? sprintf('Upgrade %s so its "%s" provision satisfies "%s".', $package, $id, $constraint)
+                    : sprintf('Upgrade a provider of "%s" to a contractVersion that satisfies "%s".', $id, $constraint),
+                sprintf('Relax the "%s" constraint "%s" on the requirer if an installed provider version is acceptable.', $id, $constraint),
             ],
             'MILPA_CAPABILITY_CONFLICT' => [
                 sprintf('Keep exactly one provider of "%s" and disable the others.', $id),
@@ -358,5 +480,27 @@ final class ErrorCatalog
         $value = $context[$key] ?? null;
 
         return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     *
+     * @return list<string>
+     */
+    private static function strList(array $context, string $key): array
+    {
+        $value = $context[$key] ?? null;
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($value as $item) {
+            if (is_string($item) && $item !== '') {
+                $out[] = $item;
+            }
+        }
+
+        return $out;
     }
 }
