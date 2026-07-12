@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/getmilpa/resolver/compare/v0.3.0...v0.4.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* the rich shape completes — priority selection, precise capability teaching, the whole report frozen
+
+### Features
+
+* the rich shape completes — priority selection, precise capability teaching, the whole report frozen ([c9a63ff](https://github.com/getmilpa/resolver/commit/c9a63ff00ede4aaa0ed83ac06e9ced35b641360c))
+
 ## [0.3.0](https://github.com/getmilpa/resolver/compare/v0.2.1...v0.3.0) (2026-07-12)
 
 
