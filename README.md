@@ -431,6 +431,121 @@ the "no dead error" rule: every code teaches a human *and* is consumable by an a
 | `artifact` | `{es, en}` | The Academy artifact URLs (optional). |
 | `llms` | `{es, en}` | The machine-readable `llms.txt` resources (required). |
 
+## Migration plan shape
+
+`Advisor\MigrationAdvisor` turns a report into an actionable `Advisor\MigrationPlan` — the
+conceptual pipeline of spec §8 (`… → ArchitectureResolver → ResolutionReport → MigrationAdvisor →
+LearnableError / Academy link`) and the separation of duties of spec §6: the resolver **detects and
+explains**, the Advisor **proposes**, a command executes only if the human accepts, and the Academy
+teaches the concept. The advisor is pure — no filesystem, no clock, no network, and it never writes;
+the same inputs yield the same plan byte for byte.
+
+```php
+use Milpa\Resolver\Advisor\MigrationAdvisor;
+
+$plan = (new MigrationAdvisor())->advise($report, $driftErrors, $hostProfile);
+$plan->toArray();   // the frozen plan shape below
+```
+
+Two optional, **caller-supplied** inputs complete the report (the same pattern as the engine's
+caller-owned `evaluatedAt` clock): `$driftErrors` is the exact list of `LearnableArchitectureError`
+objects `DriftDetector::toLearnableErrors()` returns (the host's inspect surface already holds them
+verbatim); `$hostProfile` is the profile the caller resolved against — `allowedLegacyContracts` and
+`acceptedRisks` live **only** there (the report's frozen `metadata` carries just the host label and
+the verbatim `hostMetadata`), so the `compatibility` line can only be honest when the caller passes
+the profile it already built. Without it, the plan says so; **no deadline is ever invented**.
+
+Detections group per package **name**: the attributing label (`legacy[].providedBy`,
+`missing[].requiredBy`, a drift error's `context.package`; conflicts attach to the host via
+`metadata.hostProfile`) with its `hostProfile:` scheme prefix and `@version` suffix stripped — so
+`legacy/command-host@0.0.1` and a drift on `legacy/command-host` land in the **same** package entry.
+A package with nothing actionable never appears; a report with nothing actionable yields the
+**visible** empty plan (`packages: []`, summary `0/0`), never a null. The whole serialized plan is a
+frozen contract, enforced by
+[`tests/Advisor/MigrationPlanShapeContractsTest`](tests/Advisor/MigrationPlanShapeContractsTest.php)
+against engine-generated examples (real inputs → `resolve()` → `advise()`), with the same type
+notation as the report tables above plus `int`; `non-empty-string (optional)` marks the plan's one
+optional key — **omitted** when absent, never `null`, mirroring the `errors[].context` precedent.
+
+#### `MigrationPlan`
+
+`toArray()` emits exactly these keys, **in this order**. `summary` is derived from the packages on
+every serialization, so it can never disagree with them.
+
+| Key | Type | Semantics |
+|-----|------|-----------|
+| `status` | `string (status domain)` | The originating report's status, verbatim — the plan never invents a fifth verdict. |
+| `packages` | `array[]` | One entry per package with actionable work, sorted by package name — see `packages[]`. |
+| `summary` | `array` | The derived census — see `summary`. |
+
+#### `packages[]`
+
+One package's migration work: what was detected, the recommended targets, the numbered steps, the
+honest compatibility line, and the live Academy links.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `package` | `non-empty-string` | The package name (grouping rule above): attribution label minus `hostProfile:` prefix and `@version` suffix. |
+| `detected` | `array[]` | What the report detected on this package — see `packages[].detected[]`. |
+| `recommended` | `array[]` | The concrete migration targets — see `packages[].recommended[]`. |
+| `steps` | `array[]` | The numbered actions, 1..n; the LAST is always the re-inspect — see `packages[].steps[]`. |
+| `compatibility` | `non-empty-string` | The honest window: an accepted risk's real expiry date, the profile's real `allowedLegacyContracts` posture (`*` → "no deadline; declare an explicit list to set one"; an explicit list → named verbatim), "unknown" when the profile was not supplied, or "no legacy allowance in play". Never an invented deadline. |
+| `academy` | `array[]` | The live bilingual Academy pairs the package's diagnoses carry — see `packages[].academy[]`. |
+
+#### `packages[].detected[]`
+
+One detection: a legacy path, a caller-diagnosed manifest drift, a missing requirement, or a
+provider conflict.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `kind` | `legacy-contract` \| `legacy-capability` \| `manifest-drift` \| `missing` \| `conflict` | Which raw material of the report produced the detection. |
+| `id` | `non-empty-string` | The contract/capability id (for drift, the drifted package's name). |
+| `code` | `non-empty-string (catalog)` | The learnable-error code of the underlying diagnosis. |
+| `detail` | `non-empty-string` | The report's one-line reason (or the drift error's message), verbatim. |
+
+#### `packages[].recommended[]`
+
+A concrete migration target: a legacy path's migration-hint `to` (omitted entirely when the hint
+declares none — nothing concrete is recommended over an invented target), or a missing
+requirement's canonical provider package.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `id` | `non-empty-string` | The contract/capability id being migrated or satisfied. |
+| `to` | `non-empty-string` | The target: the canonical contract version, `capabilities.*`, or the canonical package to install. |
+| `constraint` | `non-empty-string (optional)` | The requirement's version constraint, when the detection carried one — the plan's ONE optional key, omitted (never null) otherwise. |
+
+#### `packages[].steps[]`
+
+The plan of action, numbered from 1: one step per detection — its diagnosis's `fixes[0]`, the human
+fix the catalog already wrote — deduplicated, then the verification step, ALWAYS last: `Run php coa
+coa:inspect architecture again.` A plan never trusts itself.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `n` | `int` | The step number, 1..n with no gaps. |
+| `action` | `non-empty-string` | The actionable instruction, straight from the diagnosis. |
+
+#### `packages[].academy[]`
+
+The bilingual Academy lessons behind the package's diagnoses — each error's `learn.academy` pair,
+live by construction, deduplicated in first-appearance order.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `es` | `non-empty-string` | The Spanish Academy lesson URL. |
+| `en` | `non-empty-string` | The English Academy lesson URL. |
+
+#### `summary`
+
+The derived census — recomputed from the packages on every serialization.
+
+| Field | Type | Semantics |
+|-------|------|-----------|
+| `packages` | `int` | How many packages carry actionable work. |
+| `actions` | `int` | The total step count across all packages. |
+
 ## Requirements
 
 - PHP **≥ 8.3**
