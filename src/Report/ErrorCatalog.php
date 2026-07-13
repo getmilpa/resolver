@@ -21,8 +21,10 @@ namespace Milpa\Resolver\Report;
  *
  * The catalog enforces spec §25 anti-pattern 4 ("error muerto"): every code carries why + fix +
  * Academy link, proven by walking the whole catalog in the test suite. Links are the URLs verified
- * live in production — never invented; codes without a dedicated lesson point honestly at the
- * Academy root plus its llms resource. It covers the 11 initial codes of spec §13, the two codes
+ * live in production — never invented; since the superficies wave EVERY code points at the lesson
+ * that actually teaches it (version-contrato, legacy-y-migracion, superficies-puertas,
+ * riesgos-aceptados, skeleton-boot, contratos-grafo, atlas-limites) — no code rides the Academy
+ * root anymore. It covers the 11 initial codes of spec §13, the two codes
  * that split the engine's ambiguous usages (`MILPA_SURFACE_NOT_ENABLED`,
  * `MILPA_SUGGESTED_CAPABILITY_MISSING`), `MILPA_RISK_EXPIRY_UNEVALUATED` (an accepted risk whose
  * expiry could not be checked because the caller supplied no clock), `MILPA_LEGACY_NOT_ALLOWED`
@@ -56,9 +58,33 @@ final class ErrorCatalog
     ];
 
     /** @var array{es: string, en: string} */
-    private const ACADEMY_ROOT = [
-        'es' => 'https://academy.milpa.lat/',
-        'en' => 'https://academy.milpa.lat/en/',
+    private const UNIT_VERSION_CONTRATO = [
+        'es' => 'https://academy.milpa.lat/learn/fundamentos/version-contrato/',
+        'en' => 'https://academy.milpa.lat/en/learn/fundamentos/version-contrato/',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const UNIT_LEGACY_Y_MIGRACION = [
+        'es' => 'https://academy.milpa.lat/learn/arquitectura/legacy-y-migracion/',
+        'en' => 'https://academy.milpa.lat/en/learn/arquitectura/legacy-y-migracion/',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const UNIT_SUPERFICIES_PUERTAS = [
+        'es' => 'https://academy.milpa.lat/learn/arquitectura/superficies-puertas/',
+        'en' => 'https://academy.milpa.lat/en/learn/arquitectura/superficies-puertas/',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const UNIT_RIESGOS_ACEPTADOS = [
+        'es' => 'https://academy.milpa.lat/learn/arquitectura/riesgos-aceptados/',
+        'en' => 'https://academy.milpa.lat/en/learn/arquitectura/riesgos-aceptados/',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const UNIT_SKELETON_BOOT = [
+        'es' => 'https://academy.milpa.lat/learn/construye/skeleton-boot/',
+        'en' => 'https://academy.milpa.lat/en/learn/construye/skeleton-boot/',
     ];
 
     /** @var array{es: string, en: string} */
@@ -77,6 +103,12 @@ final class ErrorCatalog
     private const ARTIFACT_FRONTERA = [
         'es' => 'https://academy.milpa.lat/artifacts/#frontera',
         'en' => 'https://academy.milpa.lat/en/artifacts/#frontera',
+    ];
+
+    /** @var array{es: string, en: string} */
+    private const ARTIFACT_COMPUERTA_ARRANQUE = [
+        'es' => 'https://academy.milpa.lat/artifacts/#compuerta-arranque',
+        'en' => 'https://academy.milpa.lat/en/artifacts/#compuerta-arranque',
     ];
 
     /** @var array{es: string, en: string} */
@@ -147,7 +179,7 @@ final class ErrorCatalog
             ],
             'MILPA_CONTRACT_VERSION_UNSUPPORTED' => [
                 'why' => 'The contract is implemented, but at a version outside the range the host asked for. A version is a contract, not a label: an out-of-range implementation cannot be trusted to honour the expected shape.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_VERSION_CONTRATO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
             ],
             'MILPA_CAPABILITY_MISSING' => [
                 'why' => 'A required capability closes the architecture graph only when an installed package or plugin declares that it provides it. With no provider, the runtime cannot wire the capability and the graph stays open.',
@@ -155,7 +187,7 @@ final class ErrorCatalog
             ],
             'MILPA_CAPABILITY_VERSION_UNSUPPORTED' => [
                 'why' => 'A provider for the capability exists, but its contractVersion falls outside the range the consumer asked for. A version is a contract, not a label: the capability is present at the wrong version, so the requirement stays open until the provider upgrades or the constraint admits what is installed.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_VERSION_CONTRATO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
             ],
             'MILPA_CAPABILITY_CONFLICT' => [
                 'why' => 'Two or more providers claim the same capability and at least one marks it exclusive. The resolver refuses to pick silently: a hidden choice is exactly the invisible architecture the resolver exists to prevent.',
@@ -163,27 +195,27 @@ final class ErrorCatalog
             ],
             'MILPA_SURFACE_REQUIREMENT_UNMET' => [
                 'why' => 'An enabled surface projects operations through a set of capabilities. If one of those capabilities has no provider, the surface has an open door and the runtime would expose it half-wired.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_SUPERFICIES_PUERTAS, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
             ],
             'MILPA_ADAPTER_MISSING' => [
                 'why' => 'A contract expects an adapter to bridge it to a surface or a legacy shape, and none is installed. Without the adapter the contract cannot be projected where the host wants it.',
-                'links' => ['academy' => self::ACADEMY_ROOT, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_SUPERFICIES_PUERTAS, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
             ],
             'MILPA_HOST_PROFILE_OUTDATED' => [
                 'why' => 'The host profile describes an architectural shape the current packages no longer match. The profile, not the code, is stale: it asks for a world that has moved on.',
-                'links' => ['academy' => self::ACADEMY_ROOT, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_SKELETON_BOOT, 'llms' => self::LLMS],
             ],
             'MILPA_LEGACY_CONTRACT_ACTIVE' => [
                 'why' => 'A dependency closes through a legacy-shaped manifest. This is allowed, but never silent: legacy compatibility is named so it stays visible instead of decaying into invisible archaeology.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_LEGACY_Y_MIGRACION, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
             ],
             'MILPA_LEGACY_NOT_ALLOWED' => [
                 'why' => 'The host explicitly restricts which dependencies may close through a legacy-shaped manifest, and this one resolves only through a shape the profile does not permit. allowedLegacyContracts is a gate, not a note: unlike a tolerated legacy path — which degrades to legacy_compatible — an un-permitted one blocks. An empty or selective allowlist is a deliberate boundary the resolver enforces instead of quietly crossing.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_LEGACY_Y_MIGRACION, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
             ],
             'MILPA_DEPRECATED_CONTRACT_USED' => [
                 'why' => 'A package still declares something it has marked deprecated. It works today, but the metadata is warning you that this shape is scheduled to leave; migrating before removal is cheaper than after.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_LEGACY_Y_MIGRACION, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
             ],
             'MILPA_ARCHITECTURE_GRAPH_BLOCKED' => [
                 'why' => 'The architecture graph does not close: at least one required contract or capability is missing, or an exclusive capability conflicts. The runtime must not boot on an open graph.',
@@ -191,27 +223,27 @@ final class ErrorCatalog
             ],
             'MILPA_BOOTABLE_WITH_WARNINGS' => [
                 'why' => 'Every required dependency closes, but the graph carries warnings: suggested capabilities without providers, or surfaces with declared caveats. The host can boot, with the trade-offs made explicit.',
-                'links' => ['academy' => self::ACADEMY_ROOT, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_RIESGOS_ACEPTADOS, 'llms' => self::LLMS],
             ],
             'MILPA_SURFACE_NOT_ENABLED' => [
                 'why' => 'A contract wants to project through a surface the host has not enabled. Nothing is broken — the projection simply will not happen — but the mismatch is surfaced so it is a choice, not an accident.',
-                'links' => ['academy' => self::ACADEMY_ROOT, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_SUPERFICIES_PUERTAS, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
             ],
             'MILPA_SUGGESTED_CAPABILITY_MISSING' => [
                 'why' => 'A suggested capability has no provider. Suggested means optional: the graph still closes and the fallback path applies, but the suggested behaviour is absent.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_RIESGOS_ACEPTADOS, 'artifact' => self::ARTIFACT_SIEMBRA, 'llms' => self::LLMS],
             ],
             'MILPA_RISK_EXPIRY_UNEVALUATED' => [
                 'why' => 'An accepted risk carries an expiry, but the resolution ran without an evaluatedAt clock, so the resolver could not tell whether the acceptance is still valid. The resolver stays pure — it never reads the wall clock itself — so instead of silently trusting an expiry it never checked, it flags the oversight: an unevaluated expiry is a risk you think is bounded but is not being enforced.',
-                'links' => ['academy' => self::ACADEMY_ROOT, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_RIESGOS_ACEPTADOS, 'llms' => self::LLMS],
             ],
             'MILPA_DEPENDENCY_CYCLE' => [
                 'why' => 'A dependency cycle has no possible boot order — nobody can go first. Each member requires something another member provides, so whichever package boots first finds its requirement not yet wired. The cycle members are excluded from loadOrder[] and the graph blocks until the cycle is broken.',
-                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_COMPUERTA_ARRANQUE, 'llms' => self::LLMS],
             ],
             'MILPA_MANIFEST_DRIFT' => [
                 'why' => 'The manifest promises one architecture and the code carries another. The contract that teaches is the one that runs, not the one that is written: a drifted milpa.json teaches humans and agents a shape that no longer exists, so every decision made from it inherits the gap.',
-                'links' => ['academy' => self::UNIT_ATLAS_LIMITES, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+                'links' => ['academy' => self::UNIT_ATLAS_LIMITES, 'artifact' => self::ARTIFACT_COMPUERTA_ARRANQUE, 'llms' => self::LLMS],
             ],
         ];
     }

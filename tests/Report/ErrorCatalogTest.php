@@ -55,8 +55,8 @@ final class ErrorCatalogTest extends TestCase
      * The capability version code is fully teachable (Contrato slice T3): its own why (the provider
      * exists, but its contractVersion misses the consumer's range), fixes that name BOTH sides of the
      * mismatch (upgrade the provider / relax the constraint, templated with id + constraint), and the
-     * LIVE contratos-grafo unit plus the #siembra artifact — the same lesson family as the other
-     * graph-opening codes, never an invented URL. Contrato T4 attribution parity: this context's
+     * LIVE version-contrato unit plus the #siembra artifact — since the superficies wave, both
+     * version codes point at their own lesson, never an invented URL. Contrato T4 attribution parity: this context's
      * requiredBy is a PACKAGE, so the message now names it (the expected string was redefined by that
      * decision — host-origin phrasing is frozen separately below).
      */
@@ -83,8 +83,8 @@ final class ErrorCatalogTest extends TestCase
             $error->fixes,
         );
 
-        self::assertSame('https://academy.milpa.lat/learn/fundamentos/contratos-grafo/', $error->links['academy']['es']);
-        self::assertSame('https://academy.milpa.lat/en/learn/fundamentos/contratos-grafo/', $error->links['academy']['en']);
+        self::assertSame('https://academy.milpa.lat/learn/fundamentos/version-contrato/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/en/learn/fundamentos/version-contrato/', $error->links['academy']['en']);
         self::assertSame('https://academy.milpa.lat/artifacts/#siembra', $error->links['artifact']['es']);
         self::assertArrayHasKey('llms', $error->links);
     }
@@ -231,7 +231,7 @@ final class ErrorCatalogTest extends TestCase
     /**
      * The enforcement code is fully teachable: it names the contract and host, teaches the three honest
      * ways out (permit explicitly, permit all consciously, or migrate), and points at LIVE links only —
-     * the contratos-grafo unit, the #frontera artifact, and the llms resource. No invented URL.
+     * the legacy-y-migracion unit, the #frontera artifact, and the llms resource. No invented URL.
      */
     public function testLegacyNotAllowedIsAFullyTeachableGateCode(): void
     {
@@ -247,7 +247,7 @@ final class ErrorCatalogTest extends TestCase
         self::assertStringContainsString('allowedLegacyContracts', $fixes);
         self::assertStringContainsStringIgnoringCase('migrate', $fixes);
 
-        self::assertSame('https://academy.milpa.lat/learn/fundamentos/contratos-grafo/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/learn/arquitectura/legacy-y-migracion/', $error->links['academy']['es']);
         self::assertSame('https://academy.milpa.lat/artifacts/#frontera', $error->links['artifact']['es']);
         self::assertArrayHasKey('llms', $error->links);
     }
@@ -262,8 +262,9 @@ final class ErrorCatalogTest extends TestCase
         $fixes = implode("\n", $error->fixes);
         self::assertStringContainsStringIgnoringCase('evaluatedAt', $fixes);
         self::assertStringContainsStringIgnoringCase('expires', $fixes);
-        // Honest links only — the Academy root plus the llms resource (no invented lesson URL).
-        self::assertStringStartsWith('https://academy.milpa.lat/', $error->links['academy']['es']);
+        // The LIVE riesgos-aceptados lesson plus the llms resource (no invented lesson URL).
+        self::assertSame('https://academy.milpa.lat/learn/arquitectura/riesgos-aceptados/', $error->links['academy']['es']);
+        self::assertSame('https://academy.milpa.lat/en/learn/arquitectura/riesgos-aceptados/', $error->links['academy']['en']);
         self::assertArrayHasKey('llms', $error->links);
     }
 
@@ -365,8 +366,8 @@ final class ErrorCatalogTest extends TestCase
     /**
      * The drift code is fully teachable: the message names the drifted package, the fixes teach the
      * two honest ways out (regenerate the manifest from the code, or fix the attribute), and the
-     * learn links point at the LIVE boundary lesson (atlas-limites) plus the #frontera artifact —
-     * URLs verified live, never invented.
+     * learn links point at the LIVE boundary lesson (atlas-limites) plus the #compuerta-arranque
+     * artifact — URLs verified live, never invented.
      */
     public function testManifestDriftIsAFullyTeachableCode(): void
     {
@@ -387,7 +388,7 @@ final class ErrorCatalogTest extends TestCase
 
         self::assertSame('https://academy.milpa.lat/learn/arquitectura/atlas-limites/', $error->links['academy']['es']);
         self::assertSame('https://academy.milpa.lat/en/learn/arquitectura/atlas-limites/', $error->links['academy']['en']);
-        self::assertSame('https://academy.milpa.lat/artifacts/#frontera', $error->links['artifact']['es']);
+        self::assertSame('https://academy.milpa.lat/artifacts/#compuerta-arranque', $error->links['artifact']['es']);
         self::assertArrayHasKey('llms', $error->links);
     }
 

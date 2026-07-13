@@ -30,7 +30,7 @@ final class CapabilityMissTeachingTest extends TestCase
      * Path 1 — the constraint miss of a CAPABILITY earns its own catalog code. The provider for the
      * id EXISTS (at 1.0.0) but the consumer asked ^2.0: that is not a missing capability and not a
      * contract problem — it is a capability at the wrong version, and the full learnable error
-     * (own why, upgrade/relax fixes naming both sides, live contratos-grafo links) is frozen here.
+     * (own why, upgrade/relax fixes naming both sides, live version-contrato links) is frozen here.
      */
     public function testCapabilityConstraintMissEmitsItsOwnVersionCode(): void
     {
@@ -75,8 +75,8 @@ final class CapabilityMissTeachingTest extends TestCase
                 ],
                 'learn' => [
                     'academy' => [
-                        'es' => 'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',
-                        'en' => 'https://academy.milpa.lat/en/learn/fundamentos/contratos-grafo/',
+                        'es' => 'https://academy.milpa.lat/learn/fundamentos/version-contrato/',
+                        'en' => 'https://academy.milpa.lat/en/learn/fundamentos/version-contrato/',
                     ],
                     'artifact' => [
                         'es' => 'https://academy.milpa.lat/artifacts/#siembra',

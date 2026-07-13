@@ -53,7 +53,7 @@ final class LegacyLearnabilityTest extends TestCase
         self::assertNotSame('', $error['why']);
         self::assertNotSame([], $error['fixes']);
         self::assertSame(
-            'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',
+            'https://academy.milpa.lat/learn/arquitectura/legacy-y-migracion/',
             $error['learn']['academy']['es'],
         );
         self::assertContains(['type' => 'migrate-contract', 'contract' => 'command.host'], $error['recommendedActions']);
