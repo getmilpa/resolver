@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/getmilpa/resolver/compare/v0.5.1...v0.5.2) (2026-07-13)
+
+
+### Features
+
+* AttributeLoader ingests rich capability records — T087 lands end-to-end ([695d6be](https://github.com/getmilpa/resolver/commit/695d6beac92bc7cd546bef1d8662896b443fdeaf))
+
 ## [0.5.1](https://github.com/getmilpa/resolver/compare/v0.5.0...v0.5.1) (2026-07-13)
 
 
