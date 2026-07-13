@@ -3,6 +3,12 @@
   "description": "The architecture resolver: pure logic that resolves contracts, versioned capabilities, and surfaces against a host profile and reports whether the graph is valid, bootable-with-warnings, blocked, or legacy-compatible.",
   "type": "library",
   "license": "Apache-2.0",
+  "authors": [
+    {
+      "name": "Rodrigo Vicente - TeamX Agency",
+      "homepage": "https://teamx.agency"
+    }
+  ],
   "require": {
     "php": ">=8.3",
     "composer/semver": "^3.0",

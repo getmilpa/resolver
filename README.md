@@ -26,8 +26,9 @@ the host asked for?* Its thesis, in one line: **Composer dice si los paquetes pu
 Milpa Resolver dice si la arquitectura puede cooperar.** It is **pure**: it receives a
 fully-materialized `ResolutionInput` and returns a serializable `ResolutionReport` — it never reads
 the filesystem, opens a socket, or looks at the clock. Ingestion (reading `milpa.json` and
-reflecting `#[PluginMetadata]`) and projection (`coa inspect`, `coa doctor`, the Admin) are separate
-layers that sit on top of this engine.
+reflecting `#[PluginMetadata]` — each capability entry in either real shape, a bare interface
+FQCN or a canonical capability record, dispatched through core's `parse()`) and projection
+(`coa inspect`, `coa doctor`, the Admin) are separate layers that sit on top of this engine.
 
 It is the versioned, constraint-aware successor to `Milpa\Services\CapabilityGraphChecker` — whose
 own DocBlock names itself "the narrower predecessor a resolver should supersede for
@@ -566,8 +567,8 @@ issues via [SECURITY.md](SECURITY.md), and note that this project follows a
 
 ## License
 
-[Apache-2.0](LICENSE) © TeamX Agency.
+[Apache-2.0](LICENSE) © Rodrigo Vicente - TeamX Agency.
 
 ---
 
-Milpa is designed, built, and maintained by **[TeamX Agency](https://teamx.agency/?utm_source=github&utm_medium=readme&utm_campaign=milpa&utm_content=resolver)**.
+Milpa is designed, built, and maintained by **[Rodrigo Vicente - TeamX Agency](https://teamx.agency/?utm_source=github&utm_medium=readme&utm_campaign=milpa&utm_content=resolver)**.
