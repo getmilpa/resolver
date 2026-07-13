@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/getmilpa/resolver/compare/v0.5.0...v0.5.1) (2026-07-13)
+
+
+### Bug Fixes
+
+* learn links point at their real lessons — 12 codes leave the generic destinations ([e2d8481](https://github.com/getmilpa/resolver/commit/e2d84817c56be36d258697c6893e20eb30bdc863))
+
 ## [0.5.0](https://github.com/getmilpa/resolver/compare/v0.4.0...v0.5.0) (2026-07-13)
 
 
