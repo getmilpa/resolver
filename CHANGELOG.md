@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/getmilpa/resolver/compare/v0.4.0...v0.5.0) (2026-07-13)
+
+
+### Features
+
+* MigrationAdvisor — the report becomes an actionable migration plan ([e1811b4](https://github.com/getmilpa/resolver/commit/e1811b48ffc2bafe269fdbec41c95605afe62820))
+
 ## [0.4.0](https://github.com/getmilpa/resolver/compare/v0.3.0...v0.4.0) (2026-07-12)
 
 
