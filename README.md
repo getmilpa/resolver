@@ -22,8 +22,8 @@
 
 `milpa/resolver` answers one question before the runtime starts: *does this set of installed
 packages, contracts, versioned capabilities, and enabled surfaces actually close against the shape
-the host asked for?* Its thesis, in one line: **Composer dice si los paquetes pueden instalarse;
-Milpa Resolver dice si la arquitectura puede cooperar.** It is **pure**: it receives a
+the host asked for?* Its thesis, in one line: **Composer tells you whether the packages can be
+installed; Milpa Resolver tells you whether the architecture can cooperate.** It is **pure**: it receives a
 fully-materialized `ResolutionInput` and returns a serializable `ResolutionReport` — it never reads
 the filesystem, opens a socket, or looks at the clock. Ingestion (reading `milpa.json` and
 reflecting `#[PluginMetadata]` — each capability entry in either real shape, a bare interface
