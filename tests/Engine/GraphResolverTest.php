@@ -873,4 +873,179 @@ final class GraphResolverTest extends TestCase
 
         return null;
     }
+    // ---- P17.3: una sola ley de identidad y compatibilidad -------------------------------------
+
+    /** @param list<CapabilityProvision> $provisions */
+    private function withHostNeeding(string $need, array $provisions): ResolutionReport
+    {
+        return (new GraphResolver())->resolve(new ResolutionInput(
+            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: [$need]),
+            versionManifests: [],
+            contractManifests: [],
+            capabilityProvisions: $provisions,
+            capabilityRequirements: [],
+        ));
+    }
+
+    /**
+     * Un proveedor legacy —sin versión de contrato declarada— NO satisface una restricción real, y
+     * el motivo lo dice tal cual: nadie declaró una.
+     *
+     * Antes el envoltorio legacy fijaba `0.0.0`, así que el veredicto era el mismo pero la razón era
+     * inventada: «ninguna implementación satisface ^1.0» manda a buscar una versión demasiado vieja,
+     * cuando el problema es que no hay ninguna.
+     */
+    public function testAnUndeclaredContractVersionMissesAndSaysSo(): void
+    {
+        $report = $this->withHostNeeding(
+            'Acme\\CosaContract@^1.0',
+            [CapabilityProvision::fromInterface('Acme\\CosaContract')],
+        );
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+        self::assertSame('MILPA_CAPABILITY_VERSION_UNSUPPORTED', $report->missing[0]['code']);
+        self::assertStringContainsString('none of them declares a contract version', $report->missing[0]['reason']);
+    }
+
+    /** Y con la restricción abierta sí pasa: no saber la versión no es incompatibilidad. */
+    public function testAnUndeclaredContractVersionStillSatisfiesAnUnconstrainedRequirement(): void
+    {
+        $report = $this->withHostNeeding(
+            'Acme\\CosaContract',
+            [CapabilityProvision::fromInterface('Acme\\CosaContract')],
+        );
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+    }
+
+    /**
+     * `php:Acme\CosaContract` y `\Acme\CosaContract` son la misma capacidad. El motor comparaba por
+     * igualdad textual, así que eran dos.
+     */
+    public function testTheCanonicalPhpFormAndTheLegacyBareFqcnAreOneCapability(): void
+    {
+        $report = $this->withHostNeeding('php:Acme\\CosaContract@^1.0', [new CapabilityProvision(
+            id: '\\Acme\\CosaContract',
+            interface: '\\Acme\\CosaContract',
+            contractVersion: '1.2.0',
+        )]);
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+    }
+
+    /**
+     * Un requisito escrito contra la INTERFAZ lo satisface un registro cuyo `id` es otra cosa. El
+     * motor sólo miraba `id`; el chequeo pre-boot, el validador y el inspector ya contaban las dos.
+     */
+    public function testARequirementAgainstTheInterfaceIsSatisfiedByARecordWithAnotherId(): void
+    {
+        $report = $this->withHostNeeding('Acme\\CosaContract@^1.0', [new CapabilityProvision(
+            id: 'acme.cosa.v1',
+            interface: 'Acme\\CosaContract',
+            contractVersion: '1.2.0',
+        )]);
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+    }
+
+    /** El control negativo: unificar identidades no volvió al motor incapaz de bloquear (ADR-0029). */
+    public function testADifferentCapabilityIsStillMissing(): void
+    {
+        $report = $this->withHostNeeding('Acme\\OtraContract', [new CapabilityProvision(
+            id: 'acme.cosa.v1',
+            interface: 'Acme\\CosaContract',
+            contractVersion: '1.2.0',
+        )]);
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+        self::assertSame('MILPA_CAPABILITY_MISSING', $report->missing[0]['code']);
+    }
+    // ---- P17.3: la cardinalidad deja de depender de la sintaxis (ADR-0037) ---------------------
+
+    /** @param list<CapabilityProvision> $provisions */
+    private function withTwoProvidersOf(string $need, array $provisions): ResolutionReport
+    {
+        return (new GraphResolver())->resolve(new ResolutionInput(
+            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: [$need]),
+            versionManifests: [],
+            contractManifests: [],
+            capabilityProvisions: $provisions,
+            capabilityRequirements: [],
+        ));
+    }
+
+    /**
+     * Dos proveedores y NADIE declaró `exclusive`: no se bloquea —decidirlo aquí sería tomar la
+     * decisión que ADR-0037 dejó abierta— pero tampoco se calla.
+     */
+    public function testUndeclaredCardinalityWarnsInsteadOfBlockingOrPassingSilently(): void
+    {
+        $report = $this->withTwoProvidersOf('acme.sink', [
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Uno'),
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Dos'),
+        ]);
+
+        self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
+        self::assertSame([], $report->conflicts);
+        self::assertSame('MILPA_CAPABILITY_CARDINALITY_UNDECLARED', $report->warnings[0]['code']);
+    }
+
+    /** Declarar `exclusive: true` sí bloquea: una decisión explícita se respeta. */
+    public function testAnExplicitExclusiveTrueStillConflicts(): void
+    {
+        $report = $this->withTwoProvidersOf('acme.sink', [
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Uno', exclusive: true),
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Dos'),
+        ]);
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+        self::assertSame('MILPA_CAPABILITY_CONFLICT', $report->conflicts[0]['code']);
+    }
+
+    /** Y declarar `exclusive: false` calla del todo: también es una decisión. */
+    public function testAnExplicitExclusiveFalseIsSilent(): void
+    {
+        $report = $this->withTwoProvidersOf('acme.sink', [
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Uno', exclusive: false),
+            new CapabilityProvision('acme.sink', 'Acme\\SinkContract', '1.0.0', service: 'Acme\\Dos', exclusive: false),
+        ]);
+
+        self::assertSame(ResolutionStatus::Valid, $report->status);
+        self::assertSame([], $report->warnings);
+    }
+
+    /**
+     * El camino de migración documentado —cadena suelta → registro rico— ya no cambia la
+     * cardinalidad. Antes el mismo par pasaba en silencio escrito suelto y BLOQUEABA el arranque
+     * escrito como registro, que es el defecto exacto que ADR-0037 nombró.
+     */
+    public function testMigratingFromBareToRichDoesNotChangeCardinality(): void
+    {
+        $bare = $this->withTwoProvidersOf('Acme\\SinkContract', [
+            CapabilityProvision::fromInterface('Acme\\SinkContract'),
+            CapabilityProvision::parse('Acme\\SinkContract'),
+        ]);
+        $rich = $this->withTwoProvidersOf('Acme\\SinkContract', [
+            CapabilityProvision::fromArray(['id' => 'Acme\\SinkContract', 'interface' => 'Acme\\SinkContract', 'contractVersion' => '1.0.0']),
+            CapabilityProvision::fromArray(['id' => 'Acme\\SinkContract', 'interface' => 'Acme\\SinkContract', 'contractVersion' => '1.0.0']),
+        ]);
+
+        self::assertSame($bare->status, $rich->status, 'la forma sintáctica no decide la cardinalidad');
+        self::assertNotSame(ResolutionStatus::Blocked, $rich->status);
+    }
+
+    /**
+     * Y el conflicto se detecta por identidad canónica: `php:X` y `\X` son un solo id con dos
+     * proveedores, no dos capacidades con uno cada una.
+     */
+    public function testAConflictIsDetectedAcrossIdentityForms(): void
+    {
+        $report = $this->withTwoProvidersOf('Acme\\SinkContract', [
+            new CapabilityProvision('php:Acme\\SinkContract', 'php:Acme\\SinkContract', '1.0.0', service: 'Acme\\Uno', exclusive: true),
+            new CapabilityProvision('\\Acme\\SinkContract', '\\Acme\\SinkContract', '1.0.0', service: 'Acme\\Dos'),
+        ]);
+
+        self::assertSame(ResolutionStatus::Blocked, $report->status);
+        self::assertSame('MILPA_CAPABILITY_CONFLICT', $report->conflicts[0]['code']);
+    }
 }

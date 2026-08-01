@@ -76,11 +76,17 @@ final class ProviderPriorityTest extends TestCase
     }
 
     /**
-     * (b) With NO priority declared anywhere, behaviour is byte-identical to the pre-priority
-     * engine — the fixture is LoadOrderTest's duplicated-capability case, extended with a host
-     * requirement: selection still picks the lexicographically first label (`prov/one`), while the
-     * ordering edge still lets the LAST provider win (`prov/two`) — the documented legacy mismatch,
-     * preserved verbatim for equivalence.
+     * (b) With NO priority declared anywhere, SELECTION and ORDERING are byte-identical to the
+     * pre-priority engine — the fixture is LoadOrderTest's duplicated-capability case, extended with
+     * a host requirement: selection still picks the lexicographically first label (`prov/one`),
+     * while the ordering edge still lets the LAST provider win (`prov/two`) — the documented legacy
+     * mismatch, preserved verbatim for equivalence.
+     *
+     * What is NO LONGER identical is the silence. Two packages provide `service.shared` and neither
+     * declares `exclusive`, so the engine picks one and the choice nobody made used to leave no
+     * trace — in this very fixture, where the winner of the selection is not the winner of the load
+     * order. That now surfaces as a warning (P17.3 · ADR-0037): the verdict is unchanged, the report
+     * stops pretending the cardinality was approved.
      */
     public function testWithoutPriorityBehaviourIsByteIdenticalToTheCurrentEngine(): void
     {
@@ -97,7 +103,11 @@ final class ProviderPriorityTest extends TestCase
             capabilityRequirements: [],
         ));
 
-        self::assertSame(ResolutionStatus::Valid, $report->status);
+        self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
+
+        $undeclared = $this->entryBy($report->warnings, 'code', 'MILPA_CAPABILITY_CARDINALITY_UNDECLARED');
+        self::assertNotNull($undeclared, 'la cardinalidad sin declarar se reporta');
+        self::assertSame('service.shared', $undeclared['id']);
 
         // Selection: lexicographically first label, exactly as before.
         $resolved = $this->entryBy($report->resolved, 'id', 'service.shared');

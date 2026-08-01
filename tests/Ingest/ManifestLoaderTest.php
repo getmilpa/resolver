@@ -39,11 +39,11 @@ final class ManifestLoaderTest extends TestCase
 
         // Synthesised record: id == interface == the bare FQCN, contractVersion pinned to '0.0.0'
         // (the same unversioned default core's CapabilityProvision::fromInterface() produces — the
-        // constraint edge T2's engine range-checks with Semver::satisfies('0.0.0', '*')).
+        // constraint edge T2: una versión desconocida satisface `*` y ninguna restricción real).
         $google = $provides[0];
         self::assertSame('Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface', $google['id']);
         self::assertSame('Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface', $google['interface']);
-        self::assertSame('0.0.0', $google['contractVersion']);
+        self::assertNull($google['contractVersion'], 'legacy = versión desconocida, no 0.0.0');
     }
 
     public function testLegacyEmptyRequiresAndSuggestsSynthesiseEmptyLists(): void

@@ -44,7 +44,7 @@ final class AttributeLoaderRichRecordsTest extends TestCase
             'contractVersion' => '1.0.0',
             'service' => self::CONTACT_FORM_SERVICE,
             'priority' => 0,
-            'exclusive' => true,
+            'exclusive' => null,
         ], $manifest->capabilities['provides'][0]);
         self::assertSame('attribute', $manifest->metadata['shape']);
     }
@@ -128,22 +128,24 @@ final class AttributeLoaderRichRecordsTest extends TestCase
             'Milpa\\Plugins\\Crm\\Contracts\\LeadCaptureServiceInterface',
         ]));
 
-        // The rich record is canonical (exclusive TRUE default) ...
+        // El registro rico es canónico, y su `exclusive` es NULL porque no lo declara. Antes salía
+        // `true` por default sintáctico: la cardinalidad dependía de cómo se escribió la capacidad,
+        // no de lo que alguien decidió (ADR-0037).
         $rich = $manifest->capabilities['provides'][0];
         self::assertSame('crm.contact-form.v1', $rich['id']);
         self::assertSame('1.0.0', $rich['contractVersion']);
-        self::assertTrue($rich['exclusive']);
+        self::assertNull($rich['exclusive'], 'nadie declaró la cardinalidad');
 
-        // ... while its bare-string neighbour keeps the byte-identical legacy synthesis: id ==
-        // interface == the FQCN, contractVersion 0.0.0, no service, and exclusive FALSE — the pin
-        // fromInterface() applies because legacy declarations predate the exclusive field.
+        // ... y su vecina en cadena suelta sintetiza lo mismo: id == interface == el FQCN,
+        // contractVersion NULL (desconocida) y exclusive NULL — antes `false`, que también era
+        // decidir por quien no decidió.
         self::assertSame([
             'id' => 'Milpa\\Plugins\\Crm\\Contracts\\LeadCaptureServiceInterface',
             'interface' => 'Milpa\\Plugins\\Crm\\Contracts\\LeadCaptureServiceInterface',
-            'contractVersion' => '0.0.0',
+            'contractVersion' => null,
             'service' => null,
             'priority' => 0,
-            'exclusive' => false,
+            'exclusive' => null,
         ], $manifest->capabilities['provides'][1]);
     }
 
@@ -159,10 +161,10 @@ final class AttributeLoaderRichRecordsTest extends TestCase
         self::assertSame([
             'id' => 'Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface',
             'interface' => 'Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface',
-            'contractVersion' => '0.0.0',
+            'contractVersion' => null,
             'service' => null,
             'priority' => 0,
-            'exclusive' => false,
+            'exclusive' => null,
         ], $manifest->capabilities['provides'][0]);
         self::assertSame([], $manifest->capabilities['requires']);
         self::assertSame([], $manifest->capabilities['suggests']);
@@ -219,7 +221,7 @@ final class AttributeLoaderRichRecordsTest extends TestCase
         ]]));
 
         self::assertNull($manifest->capabilities['provides'][0]['service']);
-        self::assertTrue($manifest->capabilities['provides'][0]['exclusive']);
+        self::assertNull($manifest->capabilities['provides'][0]['exclusive'], 'sin declarar = sin decidir');
     }
 
     public function testAnEntryThatIsNeitherStringNorRecordFailsWithTheSharedTeachingMessage(): void

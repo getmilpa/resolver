@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class ErrorCatalogTest extends TestCase
 {
-    public function testCatalogCoversTheEighteenCodes(): void
+    public function testCatalogCoversTheNineteenCodes(): void
     {
         $codes = ErrorCatalog::codes();
 
@@ -46,8 +46,11 @@ final class ErrorCatalogTest extends TestCase
         self::assertContains('MILPA_RISK_EXPIRY_UNEVALUATED', $codes);
         self::assertContains('MILPA_DEPENDENCY_CYCLE', $codes);
         self::assertContains('MILPA_MANIFEST_DRIFT', $codes);
+        // P17.3: la cardinalidad que nadie declaró. No es un conflicto —nadie dijo que estuviera
+        // prohibido— pero tampoco una aprobación, y callarla era el verde que ADR-0029 prohíbe.
+        self::assertContains('MILPA_CAPABILITY_CARDINALITY_UNDECLARED', $codes);
 
-        self::assertCount(18, $codes);
+        self::assertCount(19, $codes);
         self::assertSame(array_values(array_unique($codes)), $codes, 'codes are unique');
     }
 

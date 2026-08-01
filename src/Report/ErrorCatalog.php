@@ -193,6 +193,10 @@ final class ErrorCatalog
                 'why' => 'Two or more providers claim the same capability and at least one marks it exclusive. The resolver refuses to pick silently: a hidden choice is exactly the invisible architecture the resolver exists to prevent.',
                 'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
             ],
+            'MILPA_CAPABILITY_CARDINALITY_UNDECLARED' => [
+                'why' => 'Several providers offer the same capability and none of them declares `exclusive`. That is not a conflict — nobody said it was forbidden — but it is not an approval either: the resolver picks one by priority and the choice nobody made stays invisible. Declare `exclusive` on the capability, true or false, so the graph states which one it is.',
+                'links' => ['academy' => self::UNIT_CONTRATOS_GRAFO, 'artifact' => self::ARTIFACT_FRONTERA, 'llms' => self::LLMS],
+            ],
             'MILPA_SURFACE_REQUIREMENT_UNMET' => [
                 'why' => 'An enabled surface projects operations through a set of capabilities. If one of those capabilities has no provider, the surface has an open door and the runtime would expose it half-wired.',
                 'links' => ['academy' => self::UNIT_SUPERFICIES_PUERTAS, 'artifact' => self::ARTIFACT_ATOMO, 'llms' => self::LLMS],
@@ -273,6 +277,7 @@ final class ErrorCatalog
             'MILPA_CAPABILITY_MISSING' => self::capabilityMissingMessage($context, $id, $host, $requiredBy),
             'MILPA_CAPABILITY_VERSION_UNSUPPORTED' => self::capabilityVersionUnsupportedMessage($context, $id, $constraint, $requiredBy),
             'MILPA_CAPABILITY_CONFLICT' => sprintf('The exclusive capability "%s" is claimed by more than one provider.', $id),
+            'MILPA_CAPABILITY_CARDINALITY_UNDECLARED' => sprintf('The capability "%s" has more than one provider and none of them declares `exclusive`; the resolver picks one by priority.', $id),
             'MILPA_SURFACE_REQUIREMENT_UNMET' => sprintf('The active surface "%s" requires the capability "%s", which no provider offers.', $surface, $id),
             'MILPA_ADAPTER_MISSING' => sprintf('The adapter "%s" that a contract expects is not installed.', $id),
             'MILPA_HOST_PROFILE_OUTDATED' => sprintf('The host profile %s is out of date for the installed packages.', $host),
@@ -437,6 +442,10 @@ final class ErrorCatalog
             'MILPA_CAPABILITY_CONFLICT' => [
                 sprintf('Keep exactly one provider of "%s" and disable the others.', $id),
                 sprintf('Mark "%s" non-exclusive if multiple providers are intended.', $id),
+            ],
+            'MILPA_CAPABILITY_CARDINALITY_UNDECLARED' => [
+                sprintf('Declare `exclusive: false` on "%s" if several providers are intended.', $id),
+                sprintf('Declare `exclusive: true` on "%s" and keep exactly one provider, if only one is intended.', $id),
             ],
             'MILPA_SURFACE_REQUIREMENT_UNMET' => [
                 $package !== null

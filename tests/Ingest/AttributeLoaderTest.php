@@ -37,7 +37,9 @@ final class AttributeLoaderTest extends TestCase
         $provides = $manifest->capabilities['provides'];
         self::assertCount(3, $provides);
         self::assertSame('Milpa\\OAuth\\Contracts\\GoogleOAuthServiceInterface', $provides[0]['id']);
-        self::assertSame('0.0.0', $provides[0]['contractVersion']);
+        // Desconocida, NO `0.0.0`: una declaración legacy no dice nada de la versión del contrato,
+        // y `0.0.0` contra `^1.0` significaría «demasiado vieja» en vez de «nadie dijo».
+        self::assertNull($provides[0]['contractVersion']);
         self::assertSame([], $manifest->capabilities['requires']);
         self::assertSame([], $manifest->capabilities['suggests']);
     }

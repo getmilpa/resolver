@@ -32,7 +32,8 @@ use Milpa\ValueObjects\Capability\CapabilitySuggestion;
  *   pinned by core's `fromInterface()`);
  * - a structured capability record (canonical 012, T087) — routed through core's `fromArray()` verbatim,
  *   so it validates and normalizes exactly like a canonical `milpa.json` record (real
- *   `contractVersion`/`service`, `exclusive` defaulting TRUE per capability-spec §3.1).
+ *   `contractVersion`/`service`, and `exclusive` left NULL when undeclared — the §3.1 default was
+ *   retired in P17.3 because it made cardinality depend on syntax, per ADR-0037).
  *
  * Mixing both shapes in one attribute is valid — that is the incremental migration path. The attribute's
  * `type` — the only surface declaration available at the attribute level — rides through as

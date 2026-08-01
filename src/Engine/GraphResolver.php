@@ -14,7 +14,6 @@ declare(strict_types=1);
 
 namespace Milpa\Resolver\Engine;
 
-use Composer\Semver\Semver;
 use Milpa\Resolver\Capability\RequirementLevel;
 use Milpa\Resolver\Contracts\ArchitectureResolver;
 use Milpa\Resolver\Input\ResolutionInput;
@@ -25,6 +24,7 @@ use Milpa\Resolver\Report\ErrorCatalog;
 use Milpa\Resolver\Report\LearnableArchitectureError;
 use Milpa\Resolver\Report\ResolutionReport;
 use Milpa\Resolver\Report\ResolutionStatus;
+use Milpa\Services\CapabilityMatcher;
 use Milpa\ValueObjects\Capability\CapabilityProvision;
 
 /**
@@ -56,6 +56,16 @@ final class GraphResolver implements ArchitectureResolver
     private const CODE_CAPABILITY_MISSING = 'MILPA_CAPABILITY_MISSING';
     private const CODE_CAPABILITY_VERSION_UNSUPPORTED = 'MILPA_CAPABILITY_VERSION_UNSUPPORTED';
     private const CODE_CAPABILITY_CONFLICT = 'MILPA_CAPABILITY_CONFLICT';
+
+    /**
+     * @param CapabilityMatcher $matcher The one identity-and-compatibility criterion. The engine used
+     *                                   to carry its own —exact string equality on `id` alone— which
+     *                                   made it disagree with the pre-boot check, the manifest
+     *                                   validator and the inspector (`settlement-q-p17.md`).
+     */
+    public function __construct(private readonly CapabilityMatcher $matcher = new CapabilityMatcher())
+    {
+    }
     private const CODE_SURFACE_REQUIREMENT_UNMET = 'MILPA_SURFACE_REQUIREMENT_UNMET';
     private const CODE_SURFACE_NOT_ENABLED = 'MILPA_SURFACE_NOT_ENABLED';
     private const CODE_LEGACY_CONTRACT_ACTIVE = 'MILPA_LEGACY_CONTRACT_ACTIVE';
@@ -64,6 +74,7 @@ final class GraphResolver implements ArchitectureResolver
     private const CODE_SUGGESTED_CAPABILITY_MISSING = 'MILPA_SUGGESTED_CAPABILITY_MISSING';
     private const CODE_RISK_EXPIRY_UNEVALUATED = 'MILPA_RISK_EXPIRY_UNEVALUATED';
     private const CODE_DEPENDENCY_CYCLE = 'MILPA_DEPENDENCY_CYCLE';
+    private const CODE_CAPABILITY_CARDINALITY_UNDECLARED = 'MILPA_CAPABILITY_CARDINALITY_UNDECLARED';
 
     /**
      * Resolve the architecture described by the input into a report.
@@ -104,7 +115,7 @@ final class GraphResolver implements ArchitectureResolver
             $implementations = $this->contractCandidates($input->versionManifests, $req['id']);
             $satisfying = array_values(array_filter(
                 $implementations,
-                static fn (array $impl): bool => Semver::satisfies($impl['version'], $req['constraint']),
+                fn (array $impl): bool => $this->matcher->contractIsCompatible($impl['version'], $req['constraint']),
             ));
 
             if ($satisfying === []) {
@@ -121,9 +132,10 @@ final class GraphResolver implements ArchitectureResolver
                     'reason' => $implementations === []
                         ? sprintf('No installed package implements the contract "%s".', $req['id'])
                         : sprintf(
-                            'The contract "%s" is implemented, but no implementation satisfies the constraint "%s".',
+                            'The contract "%s" is implemented, but no implementation satisfies the constraint "%s"%s.',
                             $req['id'],
                             $req['constraint'],
+                            $this->undeclaredVersionNote($implementations),
                         ),
                 ];
 
@@ -183,8 +195,11 @@ final class GraphResolver implements ArchitectureResolver
                 foreach ($contract->providesCapabilities as $capabilityId) {
                     $contractProviders[] = [
                         'id' => $capabilityId,
+                        'identities' => $this->matcher->identitiesOffered($capabilityId),
                         'version' => $contract->version,
-                        'exclusive' => false,
+                        // NULL, no `false`: un manifiesto de contrato lista las capacidades que
+                        // aporta, y en ningún lado dice si admiten varios proveedores.
+                        'exclusive' => null,
                         'label' => $label,
                         'legacy' => false,
                         'priority' => 0,
@@ -220,13 +235,18 @@ final class GraphResolver implements ArchitectureResolver
         $oneOfMissed = [];
         $requirements = $this->collectCapabilityRequirements($input, $requireOwners, $contractRequirements);
         foreach ($requirements as $req) {
+            // Identidad por forma canónica, nunca por igualdad textual: es la misma ley que usan el
+            // chequeo pre-boot, el validador de manifiestos y el inspector.
+            $accepted = $this->matcher->identitiesAccepted(
+                ['id' => $req['id'], 'oneOf' => $req['oneOf']],
+            );
             $candidates = array_values(array_filter(
                 $providers,
-                static fn (array $p): bool => $p['id'] === $req['id'] || in_array($p['id'], $req['oneOf'], true),
+                static fn (array $p): bool => array_intersect($p['identities'], $accepted) !== [],
             ));
             $satisfying = array_values(array_filter(
                 $candidates,
-                static fn (array $p): bool => Semver::satisfies($p['version'], $req['constraint']),
+                fn (array $p): bool => $this->matcher->contractIsCompatible($p['version'], $req['constraint']),
             ));
 
             if ($satisfying === []) {
@@ -253,9 +273,10 @@ final class GraphResolver implements ArchitectureResolver
                     'reason' => $candidates === []
                         ? sprintf('No active provider offers the capability "%s".', $req['id'])
                         : sprintf(
-                            'Providers for "%s" exist, but none satisfies the constraint "%s".',
+                            'Providers for "%s" exist, but none satisfies the constraint "%s"%s.',
                             $req['id'],
                             $req['constraint'],
+                            $this->undeclaredVersionNote($candidates),
                         ),
                 ];
 
@@ -363,7 +384,11 @@ final class GraphResolver implements ArchitectureResolver
         }
 
         // Exclusive conflicts — two distinct providers claiming the same exclusive capability id.
-        foreach ($this->detectConflicts($providers) as $conflict) {
+        $cardinality = $this->detectConflicts($providers);
+        foreach ($cardinality['warnings'] as $warning) {
+            $warnings[] = $warning;
+        }
+        foreach ($cardinality['conflicts'] as $conflict) {
             $conflicts[] = $conflict;
         }
 
@@ -562,7 +587,12 @@ final class GraphResolver implements ArchitectureResolver
      * manifest's `capabilities.provides`, each tagged with whether its manifest is legacy-shaped and
      * carrying its declared `priority` (absent = 0) — the field {@see pickProvider()} orders by.
      *
-     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}>
+     * Each provider carries the CANONICAL identities it offers — its `id` and its `interface`,
+     * through {@see CapabilityMatcher} — because matching on `id` alone made this engine miss a
+     * requirement written against the interface, and exact string comparison made `php:Acme\Thing`
+     * and `Acme\Thing` two different capabilities (`settlement-q-p17.md`).
+     *
+     * @return list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}>
      */
     private function collectProviders(ResolutionInput $input): array
     {
@@ -571,9 +601,12 @@ final class GraphResolver implements ArchitectureResolver
         foreach ($input->capabilityProvisions as $provision) {
             $providers[] = [
                 'id' => $provision->id,
+                'identities' => $this->matcher->identitiesOffered(
+                    ['id' => $provision->id, 'interface' => $provision->interface],
+                ),
                 'version' => $provision->contractVersion,
                 'exclusive' => $provision->exclusive,
-                'label' => $provision->service ?? sprintf('%s@%s', $provision->id, $provision->contractVersion),
+                'label' => $provision->service ?? sprintf('%s@%s', $provision->id, $provision->contractVersion ?? '?'),
                 'legacy' => false,
                 'priority' => $provision->priority,
             ];
@@ -589,6 +622,9 @@ final class GraphResolver implements ArchitectureResolver
                 $provision = CapabilityProvision::parse($entry);
                 $providers[] = [
                     'id' => $provision->id,
+                    'identities' => $this->matcher->identitiesOffered(
+                        ['id' => $provision->id, 'interface' => $provision->interface],
+                    ),
                     'version' => $provision->contractVersion,
                     'exclusive' => $provision->exclusive,
                     'label' => $provision->service ?? $package,
@@ -602,9 +638,9 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
+     * @param list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}> $providers
      *
-     * @return list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}>
+     * @return list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}>
      */
     private function dedupeProviders(array $providers): array
     {
@@ -697,10 +733,11 @@ final class GraphResolver implements ArchitectureResolver
      *
      * @param list<VersionManifest> $manifests
      *
-     * @return list<array{id: string, version: string, legacy: bool, package: string}>
+     * @return list<array{id: string, version: string|null, legacy: bool, package: string}>
      */
     private function contractCandidates(array $manifests, string $contractId): array
     {
+        $wanted = $this->matcher->identitiesOffered($contractId);
         $out = [];
         foreach ($manifests as $manifest) {
             $legacy = $this->isLegacy($manifest);
@@ -710,7 +747,7 @@ final class GraphResolver implements ArchitectureResolver
                     continue;
                 }
                 [$id, $version] = $this->splitImplementation($entry);
-                if ($id === $contractId) {
+                if (array_intersect($this->matcher->identitiesOffered($id), $wanted) !== []) {
                     $out[] = ['id' => $id, 'version' => $version, 'legacy' => $legacy, 'package' => $package];
                 }
             }
@@ -825,46 +862,98 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * Detect exclusive conflicts: an id claimed by two or more distinct providers where at least one
+     * Detect cardinality trouble for an id claimed by two or more distinct providers.
+     *
+     * Two outcomes, and the difference is who decided:
+     *
+     *  - at least one provider declares `exclusive: true` → CONFLICT, blocking. Priority never
+     *    rescues it — exclusivity is a claim about the id, not a tie to break;
+     *  - NOBODY declares `exclusive` at all → a WARNING, never a block. ADR-0037 measured that
+     *    nothing in this framework decides the cardinality of a capability and refused to legislate
+     *    who should; blocking here would take that decision, and staying silent would report a
+     *    green that means "nobody asked" (ADR-0029).
+     *
+     * The old shape read `exclusive` as a boolean that defaulted TRUE for a rich record and FALSE
+     * for a bare FQCN, so the same capability blocked or did not depending on how it was spelled.
+     *
+     * Exclusive conflicts: an id claimed by two or more distinct providers where at least one
      * marks the capability exclusive. Priority never rescues an exclusive conflict — exclusivity is a
      * claim about the id, not a tie for `pickProvider()` to break.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
+     * @param list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}> $providers
      *
-     * @return list<array<string, mixed>>
+     * @return array{conflicts: list<array<string, mixed>>, warnings: list<array<string, mixed>>}
      */
     private function detectConflicts(array $providers): array
     {
-        /** @var array<string, array{exclusive: bool, labels: list<string>}> $byId */
+        // Agrupado por IDENTIDAD CANÓNICA, no por la cadena escrita: dos proveedores de la misma
+        // capacidad escrita `php:X` y `X` son dos proveedores de una, y agrupar por texto los daba
+        // por capacidades distintas — o sea, no detectaba el conflicto.
+        /** @var array<string, array{decided: bool, exclusive: bool, labels: list<string>}> $byId */
         $byId = [];
+        /** @var array<string, string> $written */
+        $written = [];
         foreach ($providers as $provider) {
-            $id = $provider['id'];
+            $id = $provider['identities'][0] ?? $provider['id'];
             if (!isset($byId[$id])) {
-                $byId[$id] = ['exclusive' => false, 'labels' => []];
+                $byId[$id] = ['decided' => false, 'exclusive' => false, 'labels' => []];
+                $written[$id] = $provider['id'];
             }
-            $byId[$id]['exclusive'] = $byId[$id]['exclusive'] || $provider['exclusive'];
+            if ($provider['exclusive'] !== null) {
+                $byId[$id]['decided'] = true;
+                $byId[$id]['exclusive'] = $byId[$id]['exclusive'] || $provider['exclusive'];
+            }
             if (!in_array($provider['label'], $byId[$id]['labels'], true)) {
                 $byId[$id]['labels'][] = $provider['label'];
             }
         }
 
-        $out = [];
+        $conflicts = [];
+        $warnings = [];
         foreach ($byId as $id => $group) {
-            if (!$group['exclusive'] || count($group['labels']) < 2) {
+            if (count($group['labels']) < 2) {
                 continue;
             }
             $labels = $group['labels'];
             sort($labels);
-            $out[] = [
+            $name = $written[$id];
+
+            // Nadie declaró la cardinalidad y hay varios proveedores. NO se bloquea —decidir aquí
+            // sería tomar la decisión que ADR-0037 dejó abierta a propósito— pero tampoco se calla:
+            // un verde silencioso diría «esto está permitido» cuando significa «nadie lo decidió».
+            if (!$group['decided']) {
+                $warnings[] = [
+                    'kind' => 'capability',
+                    'id' => $name,
+                    'surface' => null,
+                    'code' => self::CODE_CAPABILITY_CARDINALITY_UNDECLARED,
+                    'requiredBy' => implode(', ', $labels),
+                    'fallback' => null,
+                    'message' => sprintf(
+                        'Capability "%s" has %d providers and none of them declares `exclusive`. '
+                        . 'Whether that is allowed is undeclared, so the resolver picks one by priority.',
+                        $name,
+                        count($labels),
+                    ),
+                ];
+
+                continue;
+            }
+
+            if (!$group['exclusive']) {
+                continue;
+            }
+
+            $conflicts[] = [
                 'kind' => 'capability',
-                'id' => $id,
+                'id' => $name,
                 'code' => self::CODE_CAPABILITY_CONFLICT,
                 'providedBy' => $labels,
-                'reason' => sprintf('Multiple providers claim the exclusive capability "%s".', $id),
+                'reason' => sprintf('Multiple providers claim the exclusive capability "%s".', $name),
             ];
         }
 
-        return $out;
+        return ['conflicts' => $conflicts, 'warnings' => $warnings];
     }
 
     /**
@@ -1046,8 +1135,8 @@ final class GraphResolver implements ArchitectureResolver
      * `environment.surfaces`) and carry its declared warnings; contract-declared surface needs that the
      * host has not enabled become non-blocking warnings.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $providers
-     * @param list<array{surface: string, requiredBy: string}>                                                      $contractSurfaceNeeds
+     * @param list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}> $providers
+     * @param list<array{surface: string, requiredBy: string}>                                                                                          $contractSurfaceNeeds
      *
      * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>, 2: list<array<string, mixed>>}
      */
@@ -1258,9 +1347,9 @@ final class GraphResolver implements ArchitectureResolver
      * the previous rule — non-legacy first, then the lexicographically first label. So a set with no
      * priorities in play resolves exactly as it did before priorities existed.
      *
-     * @param list<array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}> $candidates
+     * @param list<array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}> $candidates
      *
-     * @return array{id: string, version: string, exclusive: bool, label: string, legacy: bool, priority: int}
+     * @return array{id: string, identities: list<string>, version: string|null, exclusive: bool|null, label: string, legacy: bool, priority: int}
      */
     private function pickProvider(array $candidates): array
     {
@@ -1477,21 +1566,44 @@ final class GraphResolver implements ArchitectureResolver
     }
 
     /**
-     * Split an `id@version` implementation string; a bare id defaults the version to `0.0.0`.
+     * The clause a failure adds when the candidates that missed did so for declaring NO contract
+     * version at all.
      *
-     * @return array{0: string, 1: string}
+     * Without it the message reads "none satisfies ^1.0", which invites looking for a version that
+     * is too old or too new. The real state is that nobody declared one — a different problem with a
+     * different fix, and the reason the `0.0.0` placeholder had to go.
+     *
+     * @param list<array{version: string|null, ...}> $candidates
+     */
+    private function undeclaredVersionNote(array $candidates): string
+    {
+        $undeclared = \count(array_filter($candidates, static fn (array $c): bool => $c['version'] === null));
+        if ($undeclared === 0) {
+            return '';
+        }
+
+        return $undeclared === \count($candidates)
+            ? ' (none of them declares a contract version)'
+            : sprintf(' (%d of them declares no contract version)', $undeclared);
+    }
+
+    /**
+     * Split an `id@version` implementation string. A bare id yields a NULL version — not `0.0.0`,
+     * which is a real version meaning "too old" rather than "nobody declared one".
+     *
+     * @return array{0: string, 1: string|null}
      */
     private function splitImplementation(string $entry): array
     {
         $at = strpos($entry, '@');
         if ($at === false) {
-            return [trim($entry), '0.0.0'];
+            return [trim($entry), null];
         }
 
         $id = trim(substr($entry, 0, $at));
         $version = trim(substr($entry, $at + 1));
 
-        return [$id, $version === '' ? '0.0.0' : $version];
+        return [$id, $version === '' ? null : $version];
     }
 
     /**
