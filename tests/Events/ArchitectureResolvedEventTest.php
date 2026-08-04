@@ -34,7 +34,7 @@ final class ArchitectureResolvedEventTest extends TestCase
     {
         $report = new ResolutionReport(
             status: ResolutionStatus::Blocked,
-            missing: [['kind' => 'capability', 'id' => 'command.provider']],
+            missing: [['kind' => 'capability', 'id' => 'command.operations']],
             errors: [new LearnableArchitectureError(
                 code: 'MILPA_CAPABILITY_MISSING',
                 message: 'msg',

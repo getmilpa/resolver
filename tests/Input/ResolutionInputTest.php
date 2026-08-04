@@ -20,7 +20,7 @@ final class ResolutionInputTest extends TestCase
             'hostProfile' => [
                 'name' => 'agent-ready',
                 'version' => '2026.07',
-                'requiredCapabilities' => ['command.provider'],
+                'requiredCapabilities' => ['command.operations'],
             ],
             'versionManifests' => [
                 ['package' => 'milpa/command', 'version' => '0.1.0', 'contracts' => [], 'capabilities' => []],
@@ -29,7 +29,7 @@ final class ResolutionInputTest extends TestCase
                 ['id' => 'milpa.command', 'version' => '0.1'],
             ],
             'capabilityProvisions' => [
-                ['id' => 'command.provider', 'interface' => 'Milpa\\Command\\CommandProvider', 'contractVersion' => '0.1.0', 'priority' => 10, 'exclusive' => true],
+                ['id' => 'command.operations', 'interface' => 'Milpa\\Command\\CommandProvider', 'contractVersion' => '0.1.0', 'priority' => 10, 'exclusive' => true],
             ],
             'capabilityRequirements' => [
                 ['id' => 'event.dispatcher', 'interface' => 'Psr\\EventDispatcher\\EventDispatcherInterface', 'constraint' => '^1.0', 'oneOf' => ['symfony.dispatcher']],

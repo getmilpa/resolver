@@ -33,7 +33,7 @@ final class ResolutionReportTest extends TestCase
     {
         $report = new ResolutionReport(
             status: ResolutionStatus::Blocked,
-            missing: [['id' => 'command.provider', 'requiredBy' => 'milpa.runtime@0.3']],
+            missing: [['id' => 'command.operations', 'requiredBy' => 'milpa.runtime@0.3']],
             warnings: [['id' => 'audit.sink']],
         );
 
@@ -44,7 +44,7 @@ final class ResolutionReportTest extends TestCase
             ['status', 'errors', 'resolved', 'loadOrder', 'missing', 'conflicts', 'warnings', 'legacy', 'migrationHints', 'learnLinks', 'metadata'],
             array_keys($array),
         );
-        self::assertSame([['id' => 'command.provider', 'requiredBy' => 'milpa.runtime@0.3']], $array['missing']);
+        self::assertSame([['id' => 'command.operations', 'requiredBy' => 'milpa.runtime@0.3']], $array['missing']);
     }
 
     public function testAttachedErrorsSerializeInTheAgentShapeRightAfterStatus(): void
@@ -53,7 +53,7 @@ final class ResolutionReportTest extends TestCase
             code: 'MILPA_CAPABILITY_MISSING',
             message: 'msg',
             why: 'why',
-            context: ['id' => 'command.provider'],
+            context: ['id' => 'command.operations'],
             fixes: ['Install milpa/command.'],
             links: ['academy' => ['es' => 'https://academy.milpa.lat/', 'en' => 'https://academy.milpa.lat/en/']],
         );
@@ -70,7 +70,7 @@ final class ResolutionReportTest extends TestCase
             code: 'MILPA_CAPABILITY_MISSING',
             message: 'msg',
             why: 'why',
-            context: ['id' => 'command.provider'],
+            context: ['id' => 'command.operations'],
             fixes: ['Install milpa/command.'],
             links: ['academy' => ['es' => 'https://academy.milpa.lat/', 'en' => 'https://academy.milpa.lat/en/']],
         );
@@ -128,12 +128,12 @@ final class ResolutionReportTest extends TestCase
         $report = new ResolutionReport(status: ResolutionStatus::Blocked, errors: [
             new LearnableArchitectureError(
                 code: 'MILPA_CAPABILITY_MISSING',
-                message: 'The host profile agent-ready@2026.07 requires the capability "command.provider", but no active package or plugin provides it.',
+                message: 'The host profile agent-ready@2026.07 requires the capability "command.operations", but no active package or plugin provides it.',
                 why: 'With no provider, the runtime cannot wire the capability and the graph stays open.',
-                context: ['id' => 'command.provider'],
+                context: ['id' => 'command.operations'],
                 fixes: [
-                    'Install milpa/command, which provides "command.provider".',
-                    'Enable a plugin that provides "command.provider".',
+                    'Install milpa/command, which provides "command.operations".',
+                    'Enable a plugin that provides "command.operations".',
                 ],
                 links: ['academy' => [
                     'es' => 'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',
@@ -144,9 +144,9 @@ final class ResolutionReportTest extends TestCase
 
         self::assertSame(
             'MILPA_CAPABILITY_MISSING: The host profile agent-ready@2026.07 requires the capability '
-            . '"command.provider", but no active package or plugin provides it. — With no provider, the '
+            . '"command.operations", but no active package or plugin provides it. — With no provider, the '
             . 'runtime cannot wire the capability and the graph stays open. '
-            . 'Fix: Install milpa/command, which provides "command.provider". '
+            . 'Fix: Install milpa/command, which provides "command.operations". '
             . 'Learn: https://academy.milpa.lat/en/learn/fundamentos/contratos-grafo/',
             $report->firstLearnableLine(),
         );

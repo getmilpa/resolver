@@ -297,12 +297,12 @@ final class ErrorCatalogTest extends TestCase
     public function testForTemplatesTheMessageWithContext(): void
     {
         $error = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
-            'id' => 'command.provider',
+            'id' => 'command.operations',
             'requiredBy' => 'hostProfile:agent-ready@2026.07',
             'hostProfile' => 'agent-ready@2026.07',
         ]);
 
-        self::assertStringContainsString('command.provider', $error->message);
+        self::assertStringContainsString('command.operations', $error->message);
         self::assertStringContainsString('agent-ready@2026.07', $error->message);
         // The known package appears in the human fixes.
         self::assertStringContainsString('milpa/command', implode("\n", $error->fixes));
@@ -343,23 +343,23 @@ final class ErrorCatalogTest extends TestCase
      */
     public function testCapabilityMissingMessageKeepsHostPhrasingForHostInputAndAbsentOrigins(): void
     {
-        $expected = 'The host profile agent-ready@2026.07 requires the capability "command.provider", but no active package or plugin provides it.';
+        $expected = 'The host profile agent-ready@2026.07 requires the capability "command.operations", but no active package or plugin provides it.';
 
         $hostOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
-            'id' => 'command.provider',
+            'id' => 'command.operations',
             'requiredBy' => 'hostProfile:agent-ready@2026.07',
             'hostProfile' => 'agent-ready@2026.07',
         ]);
         self::assertSame($expected, $hostOrigin->message);
 
         $absentOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
-            'id' => 'command.provider',
+            'id' => 'command.operations',
             'hostProfile' => 'agent-ready@2026.07',
         ]);
         self::assertSame($expected, $absentOrigin->message);
 
         $inputOrigin = ErrorCatalog::for('MILPA_CAPABILITY_MISSING', [
-            'id' => 'command.provider',
+            'id' => 'command.operations',
             'requiredBy' => 'input',
             'hostProfile' => 'agent-ready@2026.07',
         ]);

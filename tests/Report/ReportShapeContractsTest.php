@@ -1058,7 +1058,7 @@ final class ReportShapeContractsTest extends TestCase
         return [
             // §15-1 — missing required capability (missing:capability, resolved:capability, errors).
             new ResolutionInput(
-                hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.provider', 'tool.registry']),
+                hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.operations', 'tool.registry']),
                 versionManifests: [],
                 contractManifests: [],
                 capabilityProvisions: [new CapabilityProvision('tool.registry', 'Tool\\Registry', '0.1.0')],
@@ -1084,7 +1084,7 @@ final class ReportShapeContractsTest extends TestCase
             ),
             // §15-2 — suggested capability missing (warnings:suggested-capability, resolved:capability).
             new ResolutionInput(
-                hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.provider']),
+                hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.operations']),
                 versionManifests: [
                     new VersionManifest(
                         package: 'milpa/command',
@@ -1093,14 +1093,14 @@ final class ReportShapeContractsTest extends TestCase
                         capabilities: [
                             // Same id also arrives as a typed provision below — both records opt out
                             // of §3.1's exclusive default so this stays a warnings-only scenario.
-                            'provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0', 'exclusive' => false]],
+                            'provides' => [['id' => 'command.operations', 'interface' => 'Cmd', 'contractVersion' => '0.1.0', 'exclusive' => false]],
                             'requires' => [],
                             'suggests' => ['audit.sink'],
                         ],
                     ),
                 ],
                 contractManifests: [],
-                capabilityProvisions: [new CapabilityProvision('command.provider', 'Cmd', '0.1.0', exclusive: false)],
+                capabilityProvisions: [new CapabilityProvision('command.operations', 'Cmd', '0.1.0', exclusive: false)],
                 capabilityRequirements: [],
             ),
             // §15-3 — legacy contract active (legacy:contract, migrationHints, resolved via=legacy).
@@ -1209,7 +1209,7 @@ final class ReportShapeContractsTest extends TestCase
                     name: 'agent-ready',
                     version: '2026.07',
                     requiredContracts: ['milpa.command@0.1'],
-                    requiredCapabilities: ['command.provider'],
+                    requiredCapabilities: ['command.operations'],
                     enabledSurfaces: ['cli'],
                 ),
                 versionManifests: [
@@ -1220,7 +1220,7 @@ final class ReportShapeContractsTest extends TestCase
                         id: 'milpa.command',
                         version: '0.1',
                         requiresCapabilities: ['event.dispatcher'],
-                        providesCapabilities: ['command.provider'],
+                        providesCapabilities: ['command.operations'],
                         suggestsCapabilities: ['audit.sink'],
                         surfaceRequirements: ['telegram'],
                         academyUrl: 'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',

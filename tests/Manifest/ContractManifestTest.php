@@ -17,7 +17,7 @@ final class ContractManifestTest extends TestCase
             'id' => 'milpa.command',
             'version' => '0.1',
             'requiresCapabilities' => ['event.dispatcher'],
-            'providesCapabilities' => ['command.provider', 'operation.projector'],
+            'providesCapabilities' => ['command.operations', 'operation.projector'],
             'suggestsCapabilities' => ['audit.sink'],
             'surfaceRequirements' => ['cli'],
             'academyUrl' => 'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',
@@ -32,7 +32,7 @@ final class ContractManifestTest extends TestCase
         self::assertSame('milpa.command', $c->id);
         self::assertSame('0.1', $c->version);
         self::assertSame(['event.dispatcher'], $c->requiresCapabilities);
-        self::assertSame(['command.provider', 'operation.projector'], $c->providesCapabilities);
+        self::assertSame(['command.operations', 'operation.projector'], $c->providesCapabilities);
         self::assertSame(['audit.sink'], $c->suggestsCapabilities);
         self::assertSame(['cli'], $c->surfaceRequirements);
         self::assertSame('https://academy.milpa.lat/learn/fundamentos/contratos-grafo/', $c->academyUrl);

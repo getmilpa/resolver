@@ -28,17 +28,42 @@ namespace Milpa\Resolver\Report;
 final readonly class LearnableArchitectureError
 {
     /**
-     * Capability/contract/surface ids whose canonical provider package is known, so a missing one can
-     * recommend a concrete `install-package` action (grounded in spec §22 and §15.4).
+     * Capability ids whose canonical provider package is known, so a missing one can recommend a
+     * concrete `install-package` action (spec §22 and §15.4).
+     *
+     * ── LAS LLAVES SON EL VOCABULARIO PUBLICADO, Y ANTES NO LO ERAN ──────────────────────────────
+     *
+     * Esta tabla decía `command.provider`, `operation.projector`, `mcp.transport`, `tool.registry` y
+     * `event.dispatcher`. Medido el 2026-08-04: **ninguno de esos cinco lo declaraba ningún paquete y
+     * ninguno lo pedía ningún manifiesto.** Eran ids inventados aquí, y el `?? null` de abajo los
+     * convertía en silencio — la acción `install-package` no podía dispararse nunca. Es exactamente
+     * «lo declarado que no llega a nadie» (ADR-0038), en la tabla que existe para que algo llegue.
+     *
+     * La regla que las fija, y que el gate verifica: **canónico es el vocabulario que ya está
+     * publicado y alguien puede estar consumiendo**, no el que vive en una constante. Por eso
+     * `mcp.transport` se fue y quedó `surface.mcp`, que es lo que `milpa/mcp-server` declara en su
+     * `extra.milpa.capability.provides` desde que se publicó: cambiar la constante no rompe a nadie;
+     * cambiar lo publicado sí.
+     *
+     * `scripts/library/validate-capability-identity.php` falla si una llave de aquí no la declara
+     * ningún paquete. Sin ese gate, esta tabla ya divergió una vez sin que nada se enterara.
      *
      * @var array<string, string>
      */
     public const KNOWN_PACKAGES = [
-        'command.provider' => 'milpa/command',
-        'operation.projector' => 'milpa/command',
-        'mcp.transport' => 'milpa/mcp-server',
+        'command.operations' => 'milpa/command',
+        'command.projector' => 'milpa/command',
+        'surface.mcp' => 'milpa/mcp-server',
         'tool.registry' => 'milpa/tool-runtime',
+        'core.contracts' => 'milpa/core',
         'event.dispatcher' => 'milpa/core',
+        'agent.sessions' => 'milpa/agent',
+        'agent.model' => 'milpa/ai-gateway',
+        'auth.verifier' => 'milpa/auth',
+        'http.policy' => 'milpa/auth',
+        'data.repository' => 'milpa/data',
+        'dev.generator' => 'milpa/devtools',
+        'dev.doctor' => 'milpa/devtools',
     ];
 
     /**

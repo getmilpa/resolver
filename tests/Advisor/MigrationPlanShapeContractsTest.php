@@ -629,7 +629,7 @@ final class MigrationPlanShapeContractsTest extends TestCase
             // status blocked.
             [
                 'input' => new ResolutionInput(
-                    hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.provider']),
+                    hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.operations']),
                     versionManifests: [],
                     contractManifests: [],
                     capabilityProvisions: [],
@@ -654,13 +654,13 @@ final class MigrationPlanShapeContractsTest extends TestCase
             // A clean graph → status valid, the visible empty plan.
             [
                 'input' => new ResolutionInput(
-                    hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.provider']),
+                    hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.operations']),
                     versionManifests: [
                         new VersionManifest(
                             package: 'milpa/command',
                             version: '0.1.0',
                             contracts: ['implements' => []],
-                            capabilities: ['provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0']]],
+                            capabilities: ['provides' => [['id' => 'command.operations', 'interface' => 'Cmd', 'contractVersion' => '0.1.0']]],
                         ),
                     ],
                     contractManifests: [],

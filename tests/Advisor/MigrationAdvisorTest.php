@@ -229,7 +229,7 @@ final class MigrationAdvisorTest extends TestCase
     public function testABlockedReportPlansTheInstallFromTheErrorsFirstFix(): void
     {
         $report = $this->resolve(new ResolutionInput(
-            hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.provider']),
+            hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.operations']),
             versionManifests: [],
             contractManifests: [],
             capabilityProvisions: [],
@@ -250,22 +250,22 @@ final class MigrationAdvisorTest extends TestCase
             [
                 [
                     'kind' => 'missing',
-                    'id' => 'command.provider',
+                    'id' => 'command.operations',
                     'code' => 'MILPA_CAPABILITY_MISSING',
-                    'detail' => 'No active provider offers the capability "command.provider".',
+                    'detail' => 'No active provider offers the capability "command.operations".',
                 ],
             ],
             $package['detected'],
         );
         self::assertSame(
             [
-                ['n' => 1, 'action' => 'Install milpa/command, which provides "command.provider".'],
+                ['n' => 1, 'action' => 'Install milpa/command, which provides "command.operations".'],
                 ['n' => 2, 'action' => self::REINSPECT],
             ],
             $package['steps'],
         );
         self::assertSame(
-            [['id' => 'command.provider', 'to' => 'milpa/command', 'constraint' => '*']],
+            [['id' => 'command.operations', 'to' => 'milpa/command', 'constraint' => '*']],
             $package['recommended'],
         );
         self::assertSame('no legacy allowance in play — no compatibility window applies', $package['compatibility']);
@@ -315,7 +315,7 @@ final class MigrationAdvisorTest extends TestCase
             $this->advisor()->advise($this->legacyReport(), [], $this->legacyProfile())->toArray(),
             $this->advisor()->advise($this->legacyReport(), $this->driftErrors(), $this->legacyProfile())->toArray(),
             $this->advisor()->advise($this->resolve(new ResolutionInput(
-                hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.provider', 'tool.registry']),
+                hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.operations', 'tool.registry']),
                 versionManifests: [],
                 contractManifests: [],
                 capabilityProvisions: [],
@@ -457,13 +457,13 @@ final class MigrationAdvisorTest extends TestCase
     private function validInput(): ResolutionInput
     {
         return new ResolutionInput(
-            hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.provider']),
+            hostProfile: new HostProfile('crm-host', '2026.07', requiredCapabilities: ['command.operations']),
             versionManifests: [
                 new VersionManifest(
                     package: 'milpa/command',
                     version: '0.1.0',
                     contracts: ['implements' => []],
-                    capabilities: ['provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0']]],
+                    capabilities: ['provides' => [['id' => 'command.operations', 'interface' => 'Cmd', 'contractVersion' => '0.1.0']]],
                 ),
             ],
             contractManifests: [],

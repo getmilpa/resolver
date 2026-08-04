@@ -19,7 +19,7 @@ final class HostProfileTest extends TestCase
             'version' => '2026.07',
             'requiredContracts' => ['milpa.runtime@0.3', 'milpa.command@0.1'],
             'enabledSurfaces' => ['cli', 'mcp', 'http'],
-            'requiredCapabilities' => ['event.dispatcher', 'command.provider'],
+            'requiredCapabilities' => ['event.dispatcher', 'command.operations'],
             'allowedLegacyContracts' => ['*'],
             'acceptedRisks' => [
                 ['code' => 'audit.sink-missing', 'reason' => 'Audit sink lands next sprint; low blast radius.'],
@@ -36,7 +36,7 @@ final class HostProfileTest extends TestCase
         self::assertSame('2026.07', $p->version);
         self::assertSame(['milpa.runtime@0.3', 'milpa.command@0.1'], $p->requiredContracts);
         self::assertSame(['cli', 'mcp', 'http'], $p->enabledSurfaces);
-        self::assertSame(['event.dispatcher', 'command.provider'], $p->requiredCapabilities);
+        self::assertSame(['event.dispatcher', 'command.operations'], $p->requiredCapabilities);
         self::assertSame(['*'], $p->allowedLegacyContracts);
 
         self::assertCount(1, $p->acceptedRisks);

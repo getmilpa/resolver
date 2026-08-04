@@ -17,7 +17,7 @@ final class VersionManifestTest extends TestCase
             'package' => 'milpa/command',
             'version' => '0.1.0',
             'contracts' => ['implements' => ['milpa.command@0.1'], 'requires' => ['milpa.events@0.1']],
-            'capabilities' => ['provides' => ['command.provider'], 'requires' => ['event.dispatcher'], 'suggests' => ['audit.sink']],
+            'capabilities' => ['provides' => ['command.operations'], 'requires' => ['event.dispatcher'], 'suggests' => ['audit.sink']],
             'surfaces' => ['supports' => ['cli', 'mcp', 'http']],
             'deprecations' => ['old.thing'],
             'metadata' => ['shape' => 'canonical'],
@@ -31,7 +31,7 @@ final class VersionManifestTest extends TestCase
         self::assertSame('milpa/command', $m->package);
         self::assertSame('0.1.0', $m->version);
         self::assertSame(['implements' => ['milpa.command@0.1'], 'requires' => ['milpa.events@0.1']], $m->contracts);
-        self::assertSame(['provides' => ['command.provider'], 'requires' => ['event.dispatcher'], 'suggests' => ['audit.sink']], $m->capabilities);
+        self::assertSame(['provides' => ['command.operations'], 'requires' => ['event.dispatcher'], 'suggests' => ['audit.sink']], $m->capabilities);
         self::assertSame(['supports' => ['cli', 'mcp', 'http']], $m->surfaces);
         self::assertSame(['old.thing'], $m->deprecations);
         self::assertSame(['shape' => 'canonical'], $m->metadata);

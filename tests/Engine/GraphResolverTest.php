@@ -29,7 +29,7 @@ final class GraphResolverTest extends TestCase
     }
 
     /**
-     * Scenario 1 — capability faltante: the host requires command.provider, nobody provides it.
+     * Scenario 1 — capability faltante: the host requires command.operations, nobody provides it.
      */
     public function testScenario1MissingRequiredCapabilityBlocks(): void
     {
@@ -37,7 +37,7 @@ final class GraphResolverTest extends TestCase
             hostProfile: new HostProfile(
                 name: 'agent-ready',
                 version: '2026.07',
-                requiredCapabilities: ['command.provider', 'tool.registry'],
+                requiredCapabilities: ['command.operations', 'tool.registry'],
             ),
             versionManifests: [],
             contractManifests: [],
@@ -49,7 +49,7 @@ final class GraphResolverTest extends TestCase
 
         self::assertSame(ResolutionStatus::Blocked, $report->status);
 
-        $missing = $this->entryBy($report->missing, 'id', 'command.provider');
+        $missing = $this->entryBy($report->missing, 'id', 'command.operations');
         self::assertNotNull($missing);
         self::assertSame('capability', $missing['kind']);
         self::assertSame('MILPA_CAPABILITY_MISSING', $missing['code']);
@@ -72,17 +72,17 @@ final class GraphResolverTest extends TestCase
             capabilities: [
                 // The same id also arrives as a typed provision below — the two ingestion paths
                 // deliberately coexist here, so both records opt out of §3.1's exclusive default.
-                'provides' => [['id' => 'command.provider', 'interface' => 'Cmd', 'contractVersion' => '0.1.0', 'exclusive' => false]],
+                'provides' => [['id' => 'command.operations', 'interface' => 'Cmd', 'contractVersion' => '0.1.0', 'exclusive' => false]],
                 'requires' => [],
                 'suggests' => ['audit.sink'],
             ],
         );
 
         $input = new ResolutionInput(
-            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.provider']),
+            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.operations']),
             versionManifests: [$manifest],
             contractManifests: [],
-            capabilityProvisions: [new CapabilityProvision('command.provider', 'Cmd', '0.1.0', exclusive: false)],
+            capabilityProvisions: [new CapabilityProvision('command.operations', 'Cmd', '0.1.0', exclusive: false)],
             capabilityRequirements: [],
         );
 
@@ -412,7 +412,7 @@ final class GraphResolverTest extends TestCase
     public function testReportIsByteIdempotent(): void
     {
         $input = new ResolutionInput(
-            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.provider', 'tool.registry']),
+            hostProfile: new HostProfile('agent-ready', '2026.07', requiredCapabilities: ['command.operations', 'tool.registry']),
             versionManifests: [],
             contractManifests: [],
             capabilityProvisions: [new CapabilityProvision('tool.registry', 'I', '0.1.0')],
@@ -532,7 +532,7 @@ final class GraphResolverTest extends TestCase
             name: 'agent-ready',
             version: '2026.07',
             requiredContracts: ['milpa.command@0.1'],
-            requiredCapabilities: ['command.provider'],
+            requiredCapabilities: ['command.operations'],
             enabledSurfaces: ['cli'],
         );
 
@@ -542,7 +542,7 @@ final class GraphResolverTest extends TestCase
             id: 'milpa.command',
             version: '0.1',
             requiresCapabilities: ['event.dispatcher'],
-            providesCapabilities: ['command.provider'],
+            providesCapabilities: ['command.operations'],
             suggestsCapabilities: ['audit.sink'],
             surfaceRequirements: ['telegram'],
             academyUrl: 'https://academy.milpa.lat/learn/fundamentos/contratos-grafo/',
@@ -562,8 +562,8 @@ final class GraphResolverTest extends TestCase
 
         self::assertSame(ResolutionStatus::BootableWithWarnings, $report->status);
 
-        // command.provider closes through the contract's provided capability.
-        $provided = $this->entryBy($report->resolved, 'id', 'command.provider');
+        // command.operations closes through the contract's provided capability.
+        $provided = $this->entryBy($report->resolved, 'id', 'command.operations');
         self::assertNotNull($provided);
         self::assertSame('contract:milpa.command@0.1', $provided['providedBy']);
 
@@ -620,7 +620,7 @@ final class GraphResolverTest extends TestCase
             hostProfile: new HostProfile(
                 name: 'agent-ready',
                 version: '2026.07',
-                requiredCapabilities: ['command.provider', 'tool.registry'],
+                requiredCapabilities: ['command.operations', 'tool.registry'],
             ),
             versionManifests: [],
             contractManifests: [],
@@ -635,23 +635,23 @@ final class GraphResolverTest extends TestCase
             [
                 [
                     'code' => 'MILPA_CAPABILITY_MISSING',
-                    'message' => 'The host profile agent-ready@2026.07 requires the capability "command.provider", but no active package or plugin provides it.',
+                    'message' => 'The host profile agent-ready@2026.07 requires the capability "command.operations", but no active package or plugin provides it.',
                     'why' => 'A required capability closes the architecture graph only when an installed package or plugin declares that it provides it. With no provider, the runtime cannot wire the capability and the graph stays open.',
                     'context' => [
-                        'id' => 'command.provider',
+                        'id' => 'command.operations',
                         'constraint' => '*',
                         'requiredBy' => 'hostProfile:agent-ready@2026.07',
                         'hostProfile' => 'agent-ready@2026.07',
                     ],
                     'fixes' => [
-                        'Install milpa/command, which provides "command.provider".',
-                        'Enable a plugin that provides "command.provider".',
-                        'Remove "command.provider" from the host profile if the capability is not needed.',
+                        'Install milpa/command, which provides "command.operations".',
+                        'Enable a plugin that provides "command.operations".',
+                        'Remove "command.operations" from the host profile if the capability is not needed.',
                     ],
                     'recommendedActions' => [
                         ['type' => 'install-package', 'package' => 'milpa/command'],
-                        ['type' => 'enable-plugin', 'capability' => 'command.provider'],
-                        ['type' => 'disable-feature', 'feature' => 'command.provider'],
+                        ['type' => 'enable-plugin', 'capability' => 'command.operations'],
+                        ['type' => 'disable-feature', 'feature' => 'command.operations'],
                     ],
                     'learn' => [
                         'academy' => [

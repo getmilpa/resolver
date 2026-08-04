@@ -18,17 +18,17 @@ final class LearnableArchitectureErrorTest extends TestCase
     {
         $error = new LearnableArchitectureError(
             code: 'MILPA_CAPABILITY_MISSING',
-            message: 'command.provider is missing.',
+            message: 'command.operations is missing.',
             why: 'The runtime cannot wire it.',
-            context: ['id' => 'command.provider'],
+            context: ['id' => 'command.operations'],
             fixes: ['Install milpa/command.'],
             links: ['academy' => ['es' => 'https://academy.milpa.lat/', 'en' => 'https://academy.milpa.lat/en/']],
         );
 
         self::assertSame('MILPA_CAPABILITY_MISSING', $error->code);
-        self::assertSame('command.provider is missing.', $error->message);
+        self::assertSame('command.operations is missing.', $error->message);
         self::assertSame('The runtime cannot wire it.', $error->why);
-        self::assertSame(['id' => 'command.provider'], $error->context);
+        self::assertSame(['id' => 'command.operations'], $error->context);
         self::assertSame(['Install milpa/command.'], $error->fixes);
         self::assertArrayHasKey('academy', $error->links);
     }
@@ -39,7 +39,7 @@ final class LearnableArchitectureErrorTest extends TestCase
             code: 'MILPA_CAPABILITY_MISSING',
             message: 'msg',
             why: 'why',
-            context: ['id' => 'command.provider', 'requiredBy' => 'hostProfile:x@1'],
+            context: ['id' => 'command.operations', 'requiredBy' => 'hostProfile:x@1'],
             fixes: ['fix one'],
             links: ['llms' => ['es' => 'https://academy.milpa.lat/llms.txt', 'en' => 'https://academy.milpa.lat/en/llms.txt']],
         );
@@ -52,10 +52,10 @@ final class LearnableArchitectureErrorTest extends TestCase
         );
         // learn is the constructed links map, verbatim.
         self::assertSame($error->links, $array['learn']);
-        // command.provider is a known package, so an install-package action is derived.
+        // command.operations is a known package, so an install-package action is derived.
         self::assertContains(['type' => 'install-package', 'package' => 'milpa/command'], $array['recommendedActions']);
-        self::assertContains(['type' => 'enable-plugin', 'capability' => 'command.provider'], $array['recommendedActions']);
-        self::assertContains(['type' => 'disable-feature', 'feature' => 'command.provider'], $array['recommendedActions']);
+        self::assertContains(['type' => 'enable-plugin', 'capability' => 'command.operations'], $array['recommendedActions']);
+        self::assertContains(['type' => 'disable-feature', 'feature' => 'command.operations'], $array['recommendedActions']);
     }
 
     public function testConflictDerivesChooseProviderActionFromContext(): void
