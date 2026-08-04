@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/getmilpa/resolver/compare/v0.5.3...v0.6.0) (2026-08-04)
+
+
+### Features
+
+* **ingest:** InstalledCapabilityLoader — lo que las distribuciones instaladas proveen entra al grafo ([d60dede](https://github.com/getmilpa/resolver/commit/d60dedef3c4d3168985c189012a42687f513c9c3))
+
 ## [0.5.3](https://github.com/getmilpa/resolver/compare/v0.5.2...v0.5.3) (2026-08-01)
 
 
